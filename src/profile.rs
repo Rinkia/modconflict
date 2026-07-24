@@ -42,6 +42,10 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     ("rimworld", include_str!("../profiles/rimworld.toml")),
     ("bannerlord", include_str!("../profiles/bannerlord.toml")),
+    (
+        "baldurs-gate-3",
+        include_str!("../profiles/baldurs-gate-3.toml"),
+    ),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,6 +87,18 @@ pub struct Profile {
     /// Present for games whose mods carry binary plugin records.
     #[serde(default)]
     pub records: Option<RecordSpec>,
+    /// A code-backed metadata reader, for games whose manifest is not readable
+    /// as plain text. Declarative paths stop at formats that need a query
+    /// language to navigate; naming a reader is the honest way out.
+    #[serde(default)]
+    pub metadata_reader: Option<MetadataReader>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MetadataReader {
+    /// `meta.lsx` inside a Larian `.pak` (Baldur's Gate 3).
+    Bg3Pak,
 }
 
 /// Record-level analysis, for Creation Engine games.
@@ -140,9 +156,16 @@ impl Profile {
                 return true;
             }
         }
-        !self.detect_extensions.is_empty()
-            && raw.files.iter().any(|f| {
-                f.rsplit_once('.')
+        if self.detect_extensions.is_empty() {
+            return false;
+        }
+        // The mod's own name counts as much as its contents: a BG3 mod *is* a
+        // `.pak`, so the telling extension is on the outside, not within.
+        let source = raw.source_name();
+        std::iter::once(source.as_str())
+            .chain(raw.files.iter().map(String::as_str))
+            .any(|name| {
+                name.rsplit_once('.')
                     .map(|(_, ext)| {
                         self.detect_extensions
                             .iter()

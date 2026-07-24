@@ -1,3 +1,4 @@
+mod bg3;
 mod conflict;
 #[cfg(test)]
 mod fixtures;
@@ -343,6 +344,53 @@ mod tests {
         assert_eq!(raw.len(), 1);
         assert!(raw[0].containers.is_empty());
         assert!(raw[0].files.iter().any(|f| f == "Broken.esp"));
+    }
+
+    /// A BG3 mod is a bare `.pak` in the folder, with its metadata locked
+    /// inside it — the whole path from "file the scanner would have ignored"
+    /// to "dependency reported by UUID".
+    #[test]
+    fn a_folder_of_bg3_paks_is_detected_and_its_uuids_resolved() {
+        use crate::testutil::{bg3_meta_lsx, write_bg3_pak};
+
+        const BASE: &str = "33333333-3333-3333-3333-333333333333";
+        const PATCH: &str = "22222222-2222-2222-2222-222222222222";
+        const ABSENT: &str = "99999999-9999-9999-9999-999999999999";
+
+        let dir = tempfile::tempdir().unwrap();
+        write_bg3_pak(
+            dir.path(),
+            "BaseMod",
+            &bg3_meta_lsx(BASE, "BaseMod", 36028797018963968, &[]),
+        );
+        write_bg3_pak(
+            dir.path(),
+            "PatchMod",
+            &bg3_meta_lsx(PATCH, "PatchMod", 36028797018963968, &[(BASE, "BaseMod")]),
+        );
+        write_bg3_pak(
+            dir.path(),
+            "BrokenPatch",
+            &bg3_meta_lsx(
+                "44444444-4444-4444-4444-444444444444",
+                "BrokenPatch",
+                36028797018963968,
+                &[(ABSENT, "GoneMod")],
+            ),
+        );
+
+        let (game, conflicts) = analyze(dir.path(), None);
+
+        assert_eq!(game, "baldurs-gate-3");
+        // The satisfied dependency is silent; only the absent one is reported.
+        assert_eq!(conflicts.len(), 1);
+        match &conflicts[0] {
+            Conflict::MissingDep { mod_id, dep } => {
+                assert_eq!(mod_id, "44444444-4444-4444-4444-444444444444");
+                assert_eq!(dep.name, ABSENT);
+            }
+            other => panic!("expected a missing dependency, got {other:?}"),
+        }
     }
 
     #[test]

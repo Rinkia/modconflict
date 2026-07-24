@@ -139,10 +139,31 @@ format's version drift, which is the part that actually rots:
 | `.bsa` / `.ba2` | Morrowind through Starfield | [`ba2`](https://crates.io/crates/ba2) |
 | `.vpk` | Source engine | [`vpk`](https://crates.io/crates/vpk) |
 | `.pak` | Unreal Engine 4 and 5 | [`unpak`](https://crates.io/crates/unpak) |
+| `.pak` (LSPK) | Baldur's Gate 3 and other Larian games | [`larian-formats`](https://crates.io/crates/larian-formats) |
 
 Archives are identified by magic bytes, not by extension, because renamed
-extensions are common. Adding a format is one entry in a table: a sniff
-function and a read function.
+extensions are common — Baldur's Gate 3 and Unreal both use `.pak` for two
+entirely unrelated formats, and only the header tells them apart. Adding a
+format is one entry in a table: a sniff function and a read function.
+
+An archive lying directly in the mods folder is itself a mod, which is how BG3
+and most Unreal games ship.
+
+### When the metadata is inside the archive too
+
+Some games lock the manifest in there as well. A BG3 mod keeps
+`Mods/<Name>/meta.lsx` inside its `.pak` — XML, but LSX spells an object as a
+list of `<attribute id="UUID" value="..."/>` elements, so reaching a field
+declaratively would need path predicates. A profile language with predicates is
+a query language wearing a disguise, so instead a profile can name a
+**code-backed metadata reader**:
+
+```toml
+metadata_reader = "bg3-pak"
+```
+
+The reader answers with the same id, version and dependencies a text profile
+produces, and everything downstream is unchanged.
 
 ## The record level
 
@@ -291,6 +312,7 @@ deliberately, and a checker that cries wolf gets ignored.
 | `stardew-valley` | `manifest.json` | SMAPI: `Dependencies`, `ContentPackFor` |
 | `rimworld` | `About/About.xml` | `modDependencies`, `incompatibleWith` |
 | `bannerlord` | `SubModule.xml` | `DependedModules`, attribute-carried values |
+| `baldurs-gate-3` | `meta.lsx` inside the `.pak` | Mods identified by UUID |
 | `creation-engine` | none — `.esp`/`.bsa` | Skyrim, Fallout, Starfield; archives expanded, records compared |
 
 `--list-games` prints what your build knows, including your own profiles.
@@ -300,6 +322,7 @@ deliberately, and a checker that cries wolf gets ignored.
 ```
 scan.rs       walk the folder, open archives, inventory files + metadata bytes
 container.rs  binary archives (.bsa/.ba2/.vpk/.pak) -> the paths inside them
+bg3.rs        code-backed metadata reader for Larian paks
 records.rs    Creation Engine plugins -> record overlaps, masters, plugin names
 value.rs      JSON/TOML/XML collapsed into one document tree with dotted paths
 profile.rs    the game profile schema, the built-ins, and autodetection

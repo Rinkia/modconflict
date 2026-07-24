@@ -4,7 +4,7 @@
 //! model, and it is driven entirely by data — there is no per-game code.
 
 use crate::model::{Dep, DepKind, ModEntry, Symbol, SymbolKind};
-use crate::profile::{DeclaredKind, DepSyntax, DependencySource, Profile};
+use crate::profile::{DeclaredKind, DepSyntax, DependencySource, MetadataReader, Profile};
 use crate::scan::RawMod;
 use crate::value::{self, Value};
 
@@ -28,16 +28,25 @@ pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
         }
     });
 
+    // A code-backed reader supplies what a text path cannot reach. It answers
+    // in the same shape, so everything downstream is unchanged.
+    let extracted = profile
+        .metadata_reader
+        .map(|reader| run_reader(reader, raw))
+        .unwrap_or_default();
+
     let id = root
         .and_then(|d| profile.id_field.as_deref().and_then(|f| d.get_str(f)))
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+        .or(extracted.id)
         .unwrap_or_else(|| id_from_filename(&raw.source_name()));
 
     let version = root
         .and_then(|d| profile.version_field.as_deref().and_then(|f| d.get_str(f)))
         .filter(|s| !s.is_empty())
-        .map(str::to_string);
+        .map(str::to_string)
+        .or(extracted.version);
 
     let mut provides = vec![Symbol {
         kind: SymbolKind::ModId,
@@ -54,7 +63,7 @@ pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
         }
     }
 
-    let requires = root
+    let mut requires: Vec<Dep> = root
         .map(|doc| {
             profile
                 .dependency_sources
@@ -63,6 +72,7 @@ pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
                 .collect()
         })
         .unwrap_or_default();
+    requires.extend(extracted.requires);
 
     ModEntry {
         id,
@@ -70,6 +80,22 @@ pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
         files: raw.files.clone(),
         provides,
         requires,
+    }
+}
+
+/// A reader failing is not fatal: the mod still exists on disk, keeps its
+/// filename-derived id, and still takes part in file overlap.
+fn run_reader(reader: MetadataReader, raw: &RawMod) -> crate::bg3::Extracted {
+    // These readers open the mod as a single file. A folder-shaped mod simply
+    // has nothing for them to read, which is not worth a warning.
+    if !raw.source.is_file() {
+        return Default::default();
+    }
+    match reader {
+        MetadataReader::Bg3Pak => crate::bg3::read(&raw.source).unwrap_or_else(|e| {
+            eprintln!("warning: {e:#}");
+            Default::default()
+        }),
     }
 }
 

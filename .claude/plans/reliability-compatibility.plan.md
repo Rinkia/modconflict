@@ -195,3 +195,42 @@ due volte.
   vincitore; il tool può segnalare (troppi file sciolti), non intervenire.
 - **Ordinamento automatico del load order.** È LOOT. Non riscriviamolo.
 - **GUI.** La TUI basta.
+
+
+---
+
+## 10. Fase 12 — fatta
+
+**Infrastruttura prima, profili poi.** `profiles/fixtures/<nome>/` con file di
+metadati d'esempio e `expected.json`; il test rifiuta un profilo senza fixture e
+segnala una fixture senza profilo. `expected.json` porta `source_of_truth`, così
+una fixture sbagliata si rintraccia invece di discuterla. Verificato al
+contrario: nascondendo una fixture il test fallisce con il messaggio giusto.
+
+**Quattro giochi nuovi**: Stardew Valley (SMAPI), RimWorld, Bannerlord,
+Baldur's Gate 3.
+
+**Tre lacune dello schema**, tutte generatrici latenti di falsi positivi:
+- `version_prefix` — `MinimumVersion: "1.20.0"` letto alla lettera diventa
+  `^1.20.0` per semver, che rifiuta ogni major successiva. Confermato dal vivo:
+  SpaceCore 2.5.0 risulta pulito solo con il prefisso.
+- `kind` ora vale anche per `prefixed-strings` come default di una voce nuda:
+  la stessa sintassi è lista di dipendenze per Farming Simulator e
+  `incompatibleWith` per RimWorld.
+- `optional_field`, per i formati che scrivono `Optional="true"` invece di
+  `mandatory=false`.
+
+**Un falso positivo reale**, trovato da un run dal vivo: ogni mod Stardew
+spedisce un `manifest.json`, quindi ogni coppia di mod "confliggeva". Corretto
+alla radice — il file di metadati di un profilo è noioso per definizione ed è
+escluso in automatico, così i profili futuri ereditano la correzione.
+
+**BG3 e il limite del dichiarativo.** LSX richiederebbe predicati di path.
+Invece: `metadata_reader = "bg3-pak"`, un lettore in codice che risponde nella
+stessa forma. `larian-formats` fa il parsing; noi mettiamo solo il seam. Serviva
+anche che un container a livello superiore contasse come mod, e che il
+riconoscimento guardasse il nome del file sorgente e non solo il contenuto —
+per BG3 il mod *è* il `.pak`.
+
+**Prossimo**: Fase 9 (corpus reale). Ora ancora più necessaria: quattro profili
+nuovi tarati su documentazione, zero mod veri.

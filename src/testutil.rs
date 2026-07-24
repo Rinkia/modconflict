@@ -123,6 +123,64 @@ fn subrecord(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Build a real `.pak` with the same library that reads it back, so the test
+/// exercises the wiring rather than restating the format.
+///
+/// The loose source tree is staged in its own temp directory: left in `root` it
+/// would be scanned as a second, folder-shaped mod alongside the pak.
+pub fn write_bg3_pak(root: &Path, folder: &str, meta: &str) -> PathBuf {
+    let staging = tempfile::tempdir().unwrap();
+    let mod_root = staging.path().join(folder);
+    let meta_dir = mod_root.join("Mods").join(folder);
+    std::fs::create_dir_all(&meta_dir).unwrap();
+    std::fs::write(meta_dir.join("meta.lsx"), meta).unwrap();
+
+    // The crate resolves a None destination to a bare relative filename, which
+    // lands in the process CWD rather than next to the mod.
+    let out = root.join(format!("{folder}.pak"));
+    larian_formats::lspk::write(&mod_root, Some(out.clone())).unwrap();
+    out
+}
+
+pub fn bg3_meta_lsx(uuid: &str, name: &str, version: i64, deps: &[(&str, &str)]) -> String {
+    let dependencies: String = deps
+        .iter()
+        .map(|(dep_uuid, dep_name)| {
+            format!(
+                r#"<node id="ModuleShortDesc">
+                     <attribute id="Folder" type="LSString" value="{dep_name}"/>
+                     <attribute id="Name" type="LSString" value="{dep_name}"/>
+                     <attribute id="UUID" type="FixedString" value="{dep_uuid}"/>
+                     <attribute id="Version64" type="int64" value="36028797018963968"/>
+                   </node>"#
+            )
+        })
+        .collect();
+
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<save>
+  <version major="4" minor="0" revision="9" build="331"/>
+  <region id="Config">
+<node id="root">
+  <children>
+    <node id="Dependencies">
+      <children>{dependencies}</children>
+    </node>
+    <node id="ModuleInfo">
+      <attribute id="Author" type="LSString" value="Someone"/>
+      <attribute id="Name" type="LSString" value="{name}"/>
+      <attribute id="Folder" type="LSString" value="{name}"/>
+      <attribute id="UUID" type="FixedString" value="{uuid}"/>
+      <attribute id="Version64" type="int64" value="{version}"/>
+    </node>
+  </children>
+</node>
+  </region>
+</save>"#
+    )
+}
+
 /// A minimal valid Factorio `info.json`.
 pub fn info_json(name: &str, version: &str, deps: &[&str]) -> String {
     let deps = deps

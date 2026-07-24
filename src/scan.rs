@@ -86,6 +86,10 @@ pub fn scan_dir(dir: &Path, names: &MetadataNames) -> Result<Vec<RawMod>> {
             read_archive(&path, names)
         } else if path.is_dir() {
             read_folder(&path, names)
+        } else if container::is_candidate(&path) {
+            // A .pak or .bsa lying directly in the mods folder is the mod, not
+            // a file inside one — which is how BG3 and most Unreal games ship.
+            read_container(&path)
         } else {
             continue;
         };
@@ -135,6 +139,18 @@ fn read_archive(path: &Path, names: &MetadataNames) -> Result<RawMod> {
         files,
         metadata,
         containers: Vec::new(),
+    })
+}
+
+fn read_container(path: &Path) -> Result<RawMod> {
+    let archive = container::read(path)?
+        .ok_or_else(|| anyhow::anyhow!("not a container after all"))?;
+
+    Ok(RawMod {
+        source: path.to_path_buf(),
+        files: archive.files,
+        metadata: HashMap::new(),
+        containers: vec![archive.format],
     })
 }
 

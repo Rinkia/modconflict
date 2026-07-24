@@ -1,0 +1,16 @@
+# Baldur's Gate 3.
+#
+# Mods are Larian `.pak` archives with `Mods/<Name>/meta.lsx` inside. The
+# metadata is XML, but LSX spells an object as a list of
+# `<attribute id="UUID" value="..."/>` elements, so reaching a field
+# declaratively would need path predicates — and a profile language with
+# predicates is a query language wearing a disguise. A named code reader is the
+# honest way out.
+#
+# Mods reference each other by UUID, so that is the id here. No `[load_order]`:
+# BG3 records order in `modsettings.lsx`, which the mod manager owns.
+name = "baldurs-gate-3"
+display_name = "Baldur's Gate 3"
+detect_extensions = ["pak"]
+check_file_overlap = true
+metadata_reader = "bg3-pak"
