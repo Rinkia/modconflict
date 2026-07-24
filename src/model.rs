@@ -16,6 +16,10 @@ pub struct ModEntry {
     pub provides: Vec<Symbol>,
     /// Dependencies the mod declares.
     pub requires: Vec<Dep>,
+    /// Whether the profile found and understood this mod's metadata, as
+    /// opposed to falling back to the filename. A folder where this is false
+    /// everywhere means the profile is wrong, not that the mods are clean.
+    pub metadata_found: bool,
 }
 
 /// A named thing a mod owns. Today only mod ids; prototype names (Factorio)

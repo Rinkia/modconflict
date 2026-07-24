@@ -1,0 +1,3 @@
+Factorio: scanned 2 mods
+note: no load order file found — overlap winners are unknown
+no conflicts found

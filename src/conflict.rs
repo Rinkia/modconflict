@@ -216,6 +216,7 @@ mod tests {
                 name: id.to_string(),
             }],
             requires: Vec::new(),
+            metadata_found: true,
         }
     }
 

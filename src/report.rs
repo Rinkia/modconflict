@@ -15,6 +15,10 @@ pub struct Report<'a> {
     pub containers: Vec<String>,
     /// Binary plugins parsed at the record level.
     pub plugins_read: usize,
+    /// Mods whose metadata the profile actually understood. Well short of
+    /// `mods_scanned` means the profile is wrong for this folder, not that the
+    /// folder is clean.
+    pub mods_with_metadata: usize,
     pub conflicts: &'a [Conflict],
 }
 
@@ -29,10 +33,34 @@ impl Report<'_> {
     pub fn is_clean(&self) -> bool {
         self.conflicts.is_empty()
     }
+
+    /// How much of the folder the profile actually understood, 0.0 to 1.0.
+    /// The health signal: well below 1.0 means the profile is wrong for this
+    /// folder, not that the folder is clean.
+    pub fn metadata_coverage(&self) -> f64 {
+        if self.mods_scanned == 0 {
+            return 1.0;
+        }
+        self.mods_with_metadata as f64 / self.mods_scanned as f64
+    }
 }
 
 pub fn print_text(report: &Report) {
-    println!(
+    print!("{}", text(report));
+}
+
+pub fn print_json(report: &Report) -> anyhow::Result<()> {
+    println!("{}", json(report)?);
+    Ok(())
+}
+
+/// The human report, as a string so it can be snapshotted rather than only
+/// eyeballed.
+pub fn text(report: &Report) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
         "{}: scanned {} mods{}",
         report.profile.display_name,
         report.mods_scanned,
@@ -43,7 +71,8 @@ pub fn print_text(report: &Report) {
     );
 
     if !report.containers.is_empty() {
-        println!(
+        let _ = writeln!(
+            out,
             "read {} binary {} ({})",
             report.containers.len(),
             if report.containers.len() == 1 {
@@ -56,27 +85,49 @@ pub fn print_text(report: &Report) {
     }
 
     if report.plugins_read > 0 {
-        println!("read {} plugins at record level", report.plugins_read);
+        let _ = writeln!(out, "read {} plugins at record level", report.plugins_read);
+    }
+
+    // Silence when every mod was understood; the miss is the news.
+    if report.mods_with_metadata < report.mods_scanned {
+        let _ = writeln!(
+            out,
+            "warning: read metadata for only {} of {} mods ({:.0}%) — the rest fall back to \
+             their filename. If that is most of them, this is the wrong game profile.",
+            report.mods_with_metadata,
+            report.mods_scanned,
+            report.metadata_coverage() * 100.0
+        );
     }
 
     if !report.load_order_known && report.profile.load_order.is_some() {
-        println!("note: no load order file found — overlap winners are unknown");
+        let _ = writeln!(
+            out,
+            "note: no load order file found — overlap winners are unknown"
+        );
     }
 
     if report.is_clean() {
-        println!("no conflicts found");
-        return;
+        let _ = writeln!(out, "no conflicts found");
+        return out;
     }
 
-    println!(
-        "{} conflicts ({} critical)\n",
+    let _ = writeln!(
+        out,
+        "{} {} ({} critical)\n",
         report.conflicts.len(),
+        if report.conflicts.len() == 1 {
+            "conflict"
+        } else {
+            "conflicts"
+        },
         report.critical_count()
     );
     for c in report.conflicts {
-        println!("[{}] {}", c.severity(), c.title());
+        let _ = writeln!(out, "[{}] {}", c.severity(), c.title());
     }
-    println!("\nRun with --tui for details.");
+    let _ = writeln!(out, "\nRun with --tui for details.");
+    out
 }
 
 /// The JSON envelope. Field names are part of the tool's contract, so they are
@@ -90,6 +141,7 @@ struct JsonReport<'a> {
     load_order_known: bool,
     containers_read: usize,
     plugins_read: usize,
+    mods_with_metadata: usize,
     conflict_count: usize,
     critical_count: usize,
     conflicts: Vec<JsonConflict<'a>>,
@@ -104,7 +156,7 @@ struct JsonConflict<'a> {
     data: &'a Conflict,
 }
 
-pub fn print_json(report: &Report) -> anyhow::Result<()> {
+pub fn json(report: &Report) -> anyhow::Result<String> {
     let json = JsonReport {
         game: &report.profile.name,
         game_display_name: &report.profile.display_name,
@@ -113,6 +165,7 @@ pub fn print_json(report: &Report) -> anyhow::Result<()> {
         load_order_known: report.load_order_known,
         containers_read: report.containers.len(),
         plugins_read: report.plugins_read,
+        mods_with_metadata: report.mods_with_metadata,
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
         conflicts: report
@@ -127,8 +180,7 @@ pub fn print_json(report: &Report) -> anyhow::Result<()> {
             .collect(),
     };
 
-    println!("{}", serde_json::to_string_pretty(&json)?);
-    Ok(())
+    Ok(serde_json::to_string_pretty(&json)?)
 }
 
 /// `["a", "a", "b"]` -> `"a x2, b"`, so the note stays one line however many
@@ -210,6 +262,7 @@ mod tests {
             load_order_known: true,
             containers: Vec::new(),
             plugins_read: 0,
+            mods_with_metadata: 3,
             conflicts: &conflicts,
         };
 
@@ -238,6 +291,7 @@ mod tests {
             load_order_known: true,
             containers: Vec::new(),
             plugins_read: 0,
+            mods_with_metadata: 3,
             conflicts: &conflicts,
         };
 
@@ -258,6 +312,7 @@ mod tests {
             load_order_known: true,
             containers: Vec::new(),
             plugins_read: 0,
+            mods_with_metadata: 3,
             conflicts: &conflicts,
         };
 

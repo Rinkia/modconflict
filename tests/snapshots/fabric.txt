@@ -1,0 +1,6 @@
+Minecraft (Fabric): scanned 2 mods
+1 conflict (0 critical)
+
+[WARN] 2 mods ship assets/stone.png
+
+Run with --tui for details.

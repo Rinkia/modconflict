@@ -1,0 +1,7 @@
+Factorio: scanned 3 mods (1 disabled, skipped)
+2 conflicts (2 critical)
+
+[CRIT] alpha is incompatible with gamma
+[CRIT] alpha needs base >=2.0.0
+
+Run with --tui for details.

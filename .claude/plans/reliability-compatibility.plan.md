@@ -234,3 +234,40 @@ per BG3 il mod *è* il `.pak`.
 
 **Prossimo**: Fase 9 (corpus reale). Ora ancora più necessaria: quattro profili
 nuovi tarati su documentazione, zero mod veri.
+
+
+---
+
+## 11. Fase 9 — fatta (l'infrastruttura)
+
+**Vincolo dichiarato**: i mod reali non possono stare nel repo — lavoro altrui,
+licenze altrui, e pesanti. Quindi il corpus vive sulla macchina di chi lo lancia
+e questa fase consegna ciò che rende la validazione *ripetibile*, non il corpus.
+
+**Il segnale che mancava.** Un profilo sottilmente sbagliato non crasha: non
+legge niente, ripiega sui nomi file e riporta allegramente una cartella pulita.
+Ora ogni report dice quanto ha capito. Dimostrato dal vivo forzando il profilo
+sbagliato: `no conflicts found` accompagnato da `0 of 4 mods (0%)`. Da solo,
+quel "no conflicts found" era una bugia pericolosa.
+
+`mods_with_metadata` è anche nel JSON, ed è l'asserzione forte del corpus.
+
+**`analyze.rs`**: il pipeline era duplicato tra `main` e i test, e ora serve
+anche al corpus. Un test che reimplementa il pipeline dimostra che funziona la
+reimplementazione. Un solo punto, tre chiamanti.
+
+**`corpus.rs`**: test `#[ignore]`d, `MODCONFLICT_CORPUS` più un `corpus.toml`
+per cartella con gioco atteso, minimo di mod, copertura minima, budget di tempo
+e plugin illeggibili tollerati. Ogni entry gira anche dopo un fallimento — serve
+il quadro completo, non il primo inciampo. Le asserzioni riguardano la salute
+del *tool*, mai la pulizia dei mod: una cartella vera ha conflitti, e un harness
+che fallisse su quelli sarebbe inutile. Tre test non-ignored coprono l'harness
+stesso, incluso il caso "profilo sbagliato deve fallire il check".
+
+**`snapshot.rs`** + `tests/snapshots/`: testo e JSON congelati per cartelle note.
+`UPDATE_SNAPSHOTS=1` per rigenerare. Ha già pagato: ha reso visibile
+"1 conflicts", corretto subito.
+
+**Resta da fare, e serve una persona con dei mod**: puntare `MODCONFLICT_CORPUS`
+a cartelle vere e tarare. Copertura sotto il 100% su una cartella fidata è un
+bug da scrivere.

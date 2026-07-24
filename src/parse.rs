@@ -34,6 +34,7 @@ pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
         .metadata_reader
         .map(|reader| run_reader(reader, raw))
         .unwrap_or_default();
+    let reader_answered = extracted.id.is_some();
 
     let id = root
         .and_then(|d| profile.id_field.as_deref().and_then(|f| d.get_str(f)))
@@ -80,6 +81,11 @@ pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
         files: raw.files.clone(),
         provides,
         requires,
+        // A profile with neither a metadata file nor a reader (Creation Engine)
+        // is not failing to read anything — there is nothing to read.
+        metadata_found: root.is_some()
+            || reader_answered
+            || (profile.metadata_file.is_none() && profile.metadata_reader.is_none()),
     }
 }
 

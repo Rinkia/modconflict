@@ -320,6 +320,7 @@ deliberately, and a checker that cries wolf gets ignored.
 ## Architecture
 
 ```
+analyze.rs    the whole pipeline in one call, shared by the CLI and the tests
 scan.rs       walk the folder, open archives, inventory files + metadata bytes
 container.rs  binary archives (.bsa/.ba2/.vpk/.pak) -> the paths inside them
 bg3.rs        code-backed metadata reader for Larian paks
@@ -344,6 +345,79 @@ cargo clippy --all-targets
 
 Tests build throwaway zip archives in a temp directory, so the suite runs
 anywhere, offline, with no game installed.
+
+### Is it actually reading your mods?
+
+Every report says how much of the folder the profile understood. A profile that
+is subtly wrong does not crash: it parses nothing, falls back to filenames, and
+cheerfully reports a clean folder. So the tool says when that happens.
+
+```
+$ modconflict ~/factorio/mods --game rimworld
+RimWorld: scanned 4 mods
+warning: read metadata for only 0 of 4 mods (0%) — the rest fall back to their filename.
+         If that is most of them, this is the wrong game profile.
+no conflicts found
+```
+
+"no conflicts found" on its own would have been a dangerous lie. The JSON
+report carries the same number as `mods_with_metadata`.
+
+### Validating against real mods
+
+Fixtures prove a profile matches the format **as documented**. Whether the
+documentation matches what modders actually publish is a different question,
+and only real mods answer it. Real mods cannot live in this repository — other
+people's work, other people's licences, and large — so the corpus lives on your
+machine and the harness is opt-in.
+
+Point `MODCONFLICT_CORPUS` at a directory holding a `corpus.toml`:
+
+```toml
+[[entry]]
+path = "factorio"              # relative to the corpus dir, or absolute
+game = "factorio"              # the profile detection must land on
+min_mods = 20
+min_metadata_coverage = 0.95   # share of mods whose metadata must be read
+
+[[entry]]
+path = "/home/me/MO2/Skyrim/mods"
+game = "creation-engine"
+min_metadata_coverage = 0.0    # this game has no text metadata to read
+max_unreadable_plugins = 2
+max_seconds = 120.0
+```
+
+```bash
+MODCONFLICT_CORPUS=/path/to/corpus cargo test --ignored corpus
+```
+
+Every entry runs even after one fails, so the output is a full picture rather
+than the first thing that broke:
+
+```
+ok    factorio: factorio [43 mods, 100% understood, 7 conflicts, 0.4s]
+FAIL  stardew: stardew-valley [61 mods, 62% understood, 3 conflicts, 0.6s]
+    - understood the metadata of only 62% of mods (38 of 61), expected 95%
+```
+
+The assertions are about the health of the **tool**, never the cleanliness of
+the mods: a real mod folder is expected to have conflicts, and a harness that
+failed on them would be useless.
+
+Building a corpus means pointing it at mod folders you already have — a
+Factorio `mods/`, a Mod Organizer `mods/` tree, a Stardew `Mods/`. Coverage
+below 100% on a folder you trust is a bug report waiting to be written.
+
+### Frozen reports
+
+`tests/snapshots/` holds the exact text and JSON a few known folders produce, so
+a change in wording, ordering or counts shows up as a diff instead of shipping
+unnoticed. After a deliberate change:
+
+```bash
+UPDATE_SNAPSHOTS=1 cargo test snapshot
+```
 
 ### Every profile must prove itself
 
@@ -370,8 +444,9 @@ only a corpus of real mods does that, and that is the next step.
 - **No real mod has been through this tool yet.** Every test uses fixtures
   built from format documentation. The parsing libraries are tested upstream,
   but the integration around them — path heuristics, id fallbacks, game
-  detection — is calibrated on invented examples. Treat the profiles as
-  informed claims until a corpus of real mods says otherwise.
+  detection — is calibrated on invented examples. The corpus harness above
+  exists to change that, but it needs a corpus: until someone runs it, treat
+  the profiles as informed claims.
 - Bannerlord versions are written `v1.0.0`, which semver cannot read, so its
   version requirements come out unverified rather than wrong.
 

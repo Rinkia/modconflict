@@ -1,5 +1,8 @@
+mod analyze;
 mod bg3;
 mod conflict;
+#[cfg(test)]
+mod corpus;
 #[cfg(test)]
 mod fixtures;
 mod container;
@@ -11,6 +14,8 @@ mod records;
 mod report;
 mod scan;
 #[cfg(test)]
+mod snapshot;
+#[cfg(test)]
 mod testutil;
 mod tui;
 mod value;
@@ -21,8 +26,6 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::Parser;
 
-use conflict::DetectOptions;
-use report::Report;
 
 /// Scan a game mod folder and report conflicts before the game crashes.
 #[derive(Parser)]
@@ -76,73 +79,31 @@ fn main() -> ExitCode {
 /// Returns whether the folder is clean.
 fn run() -> Result<bool> {
     let cli = Cli::parse();
-    let profiles = profile::load_all(cli.profiles.as_deref())?;
 
     if cli.list_games {
-        for p in &profiles {
+        for p in profile::load_all(cli.profiles.as_deref())? {
             println!("{:<20} {}", p.name, p.display_name);
         }
         return Ok(true);
     }
 
-    let raw = scan::scan_dir(&cli.path, &profile::metadata_filenames(&profiles))?;
-    let profile = match cli.game.as_deref() {
-        Some(name) => profile::by_name(&profiles, name)?,
-        None => profile::detect(&profiles, &raw)?,
-    };
+    let analysis = analyze::run(
+        &cli.path,
+        &analyze::Options {
+            game: cli.game.as_deref(),
+            load_order: cli.load_order.as_deref(),
+            profiles_dir: cli.profiles.as_deref(),
+            skip_records: cli.no_records,
+        },
+    )?;
 
-    let load_order = loadorder::read(profile, &cli.path, cli.load_order.as_deref())?;
-    let mut all_mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(profile, m)).collect();
-
-    // The record pass runs before mods are filtered, because it needs the raw
-    // mods and the parsed ones lined up one to one.
-    let records = match (&profile.records, cli.no_records) {
-        (Some(spec), false) => records::scan(spec, &raw, &all_mods),
-        _ => records::RecordScan::default(),
-    };
-    records.enrich(&mut all_mods);
-    for problem in &records.unreadable {
+    for problem in &analysis.unreadable_plugins {
         eprintln!("warning: cannot read plugin {problem}");
     }
 
-    let ids: Vec<_> = all_mods.iter().map(|m| m.id.clone()).collect();
-    let mods_disabled = report::disabled_count(&load_order, &ids);
-    // A mod the player switched off cannot conflict with anything.
-    let mods: Vec<_> = all_mods
-        .into_iter()
-        .filter(|m| !load_order.is_disabled(&m.id))
-        .collect();
-
-    let options = DetectOptions {
-        check_file_overlap: profile.check_file_overlap,
-        load_order: load_order.clone(),
-        metadata_names: profile::metadata_filenames(std::slice::from_ref(profile)),
-    };
-    let mut conflicts = conflict::detect(&mods, &options);
-
-    let enabled: std::collections::HashSet<&str> = mods.iter().map(|m| m.id.as_str()).collect();
-    conflicts.extend(records.overlaps(&enabled));
-    conflicts.sort_by(|a, b| {
-        b.severity()
-            .cmp(&a.severity())
-            .then_with(|| a.title().cmp(&b.title()))
-    });
-
-    let report = Report {
-        profile,
-        mods_scanned: mods.len(),
-        mods_disabled,
-        load_order_known: !load_order.is_empty(),
-        containers: raw
-            .iter()
-            .flat_map(|m| m.containers.iter().map(|c| c.to_string()))
-            .collect(),
-        plugins_read: records.plugin_count(),
-        conflicts: &conflicts,
-    };
-
+    let report = analysis.report();
     if cli.tui {
-        tui::run(conflicts.clone())?;
+        tui::run(analysis.conflicts.clone())?;
     } else if cli.json {
         report::print_json(&report)?;
     } else {
@@ -158,25 +119,17 @@ mod tests {
     use crate::testutil::{info_json, metadata_names, write_zip_mod};
     use std::path::Path;
 
-    /// Scan, detect the game, parse, and report — over real zips on disk.
+    /// The same pipeline the CLI runs, over real archives on disk.
     fn analyze(dir: &Path, load_order: Option<&Path>) -> (String, Vec<Conflict>) {
-        let profiles = profile::load_all(None).unwrap();
-        let raw = scan::scan_dir(dir, &metadata_names()).unwrap();
-        let profile = profile::detect(&profiles, &raw).unwrap();
-        let order = loadorder::read(profile, dir, load_order).unwrap();
-
-        let mods: Vec<_> = raw
-            .iter()
-            .map(|m| parse::parse_mod(profile, m))
-            .filter(|m| !order.is_disabled(&m.id))
-            .collect();
-
-        let options = DetectOptions {
-            check_file_overlap: profile.check_file_overlap,
-            load_order: order,
-            metadata_names: profile::metadata_filenames(std::slice::from_ref(profile)),
-        };
-        (profile.name.clone(), conflict::detect(&mods, &options))
+        let analysis = analyze::run(
+            dir,
+            &analyze::Options {
+                load_order,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        (analysis.profile.name.clone(), analysis.conflicts)
     }
 
     fn factorio_mod(dir: &Path, name: &str, version: &str, deps: &[&str]) {

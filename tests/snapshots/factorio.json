@@ -1,0 +1,35 @@
+{
+  "game": "factorio",
+  "game_display_name": "Factorio",
+  "mods_scanned": 3,
+  "mods_disabled": 1,
+  "load_order_known": true,
+  "containers_read": 0,
+  "plugins_read": 0,
+  "mods_with_metadata": 3,
+  "conflict_count": 2,
+  "critical_count": 2,
+  "conflicts": [
+    {
+      "severity": "critical",
+      "title": "alpha is incompatible with gamma",
+      "detail": "alpha declares \"gamma\" as incompatible, and gamma is installed.\n\nRemove one of the two.",
+      "kind": "incompatible",
+      "mod_id": "alpha",
+      "other": "gamma"
+    },
+    {
+      "severity": "critical",
+      "title": "alpha needs base >=2.0.0",
+      "detail": "alpha requires \"base\" >=2.0.0, but version 1.1.0 is installed.\n\nUpdate \"base\", or downgrade alpha.",
+      "kind": "version_mismatch",
+      "mod_id": "alpha",
+      "dep": {
+        "name": "base",
+        "req": ">=2.0.0",
+        "kind": "required"
+      },
+      "found": "1.1.0"
+    }
+  ]
+}
