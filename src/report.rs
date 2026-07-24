@@ -11,6 +11,8 @@ pub struct Report<'a> {
     pub mods_scanned: usize,
     pub mods_disabled: usize,
     pub load_order_known: bool,
+    /// Binary archives whose contents were expanded into the scan, by format.
+    pub containers: Vec<String>,
     pub conflicts: &'a [Conflict],
 }
 
@@ -37,6 +39,19 @@ pub fn print_text(report: &Report) {
             n => format!(" ({n} disabled, skipped)"),
         }
     );
+
+    if !report.containers.is_empty() {
+        println!(
+            "read {} binary {} ({})",
+            report.containers.len(),
+            if report.containers.len() == 1 {
+                "archive"
+            } else {
+                "archives"
+            },
+            summarize(&report.containers)
+        );
+    }
 
     if !report.load_order_known && report.profile.load_order.is_some() {
         println!("note: no load order file found — overlap winners are unknown");
@@ -67,6 +82,7 @@ struct JsonReport<'a> {
     mods_scanned: usize,
     mods_disabled: usize,
     load_order_known: bool,
+    containers_read: usize,
     conflict_count: usize,
     critical_count: usize,
     conflicts: Vec<JsonConflict<'a>>,
@@ -88,6 +104,7 @@ pub fn print_json(report: &Report) -> anyhow::Result<()> {
         mods_scanned: report.mods_scanned,
         mods_disabled: report.mods_disabled,
         load_order_known: report.load_order_known,
+        containers_read: report.containers.len(),
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
         conflicts: report
@@ -104,6 +121,24 @@ pub fn print_json(report: &Report) -> anyhow::Result<()> {
 
     println!("{}", serde_json::to_string_pretty(&json)?);
     Ok(())
+}
+
+/// `["a", "a", "b"]` -> `"a x2, b"`, so the note stays one line however many
+/// archives a mod folder holds.
+fn summarize(items: &[String]) -> String {
+    let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();
+    for item in items {
+        *counts.entry(item.as_str()).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(name, n)| if n == 1 {
+            name.to_string()
+        } else {
+            format!("{name} x{n}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// How many mods the load order switched off.
@@ -165,6 +200,7 @@ mod tests {
             mods_scanned: 3,
             mods_disabled: 0,
             load_order_known: true,
+            containers: Vec::new(),
             conflicts: &conflicts,
         };
 
@@ -191,6 +227,7 @@ mod tests {
             mods_scanned: 3,
             mods_disabled: 0,
             load_order_known: true,
+            containers: Vec::new(),
             conflicts: &conflicts,
         };
 
@@ -209,6 +246,7 @@ mod tests {
             mods_scanned: 3,
             mods_disabled: 1,
             load_order_known: true,
+            containers: Vec::new(),
             conflicts: &conflicts,
         };
 

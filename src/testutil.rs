@@ -44,6 +44,20 @@ pub fn write_folder_mod(dir: &Path, name: &str, entries: &[(&str, &str)]) -> Pat
     root
 }
 
+/// Write a real Morrowind-era `.bsa` containing empty files at `entries`.
+///
+/// Built with the same library that reads it back, which proves the wiring
+/// rather than the format — the format itself is the library's problem, and it
+/// is tested against the reference C++ suite upstream.
+pub fn write_bsa(path: &Path, entries: &[&str]) {
+    let mut archive = ba2::tes3::Archive::new();
+    for name in entries {
+        archive.insert(ba2::tes3::ArchiveKey::from(*name), ba2::tes3::File::default());
+    }
+    let mut out = std::fs::File::create(path).unwrap();
+    archive.write(&mut out).unwrap();
+}
+
 /// A minimal valid Factorio `info.json`.
 pub fn info_json(name: &str, version: &str, deps: &[&str]) -> String {
     let deps = deps

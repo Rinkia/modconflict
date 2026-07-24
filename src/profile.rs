@@ -32,6 +32,10 @@ const BUILTIN: &[(&str, &str)] = &[
         "farming-simulator",
         include_str!("../profiles/farming-simulator.toml"),
     ),
+    (
+        "creation-engine",
+        include_str!("../profiles/creation-engine.toml"),
+    ),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,9 +45,16 @@ pub struct Profile {
     pub name: String,
     pub display_name: String,
     /// Metadata filename to look for inside each mod, matched on the basename
-    /// so it is found at any depth.
-    pub metadata_file: String,
-    pub format: Format,
+    /// so it is found at any depth. Absent for games that ship no text
+    /// metadata at all — those are identified by `detect_extensions`.
+    #[serde(default)]
+    pub metadata_file: Option<String>,
+    #[serde(default)]
+    pub format: Option<Format>,
+    /// File extensions that identify this game when there is no metadata file,
+    /// e.g. `esp`/`bsa` for the Creation Engine.
+    #[serde(default)]
+    pub detect_extensions: Vec<String>,
     /// Path prefix into the parsed document, e.g. `modDesc` for XML.
     #[serde(default)]
     pub root: String,
@@ -67,6 +78,27 @@ pub struct Profile {
 
 fn yes() -> bool {
     true
+}
+
+impl Profile {
+    /// Does this mod look like it belongs to this game?
+    pub fn matches(&self, raw: &RawMod) -> bool {
+        if let Some(name) = self.metadata_file.as_deref() {
+            if raw.metadata_named(name).is_some() {
+                return true;
+            }
+        }
+        !self.detect_extensions.is_empty()
+            && raw.files.iter().any(|f| {
+                f.rsplit_once('.')
+                    .map(|(_, ext)| {
+                        self.detect_extensions
+                            .iter()
+                            .any(|want| want.eq_ignore_ascii_case(ext))
+                    })
+                    .unwrap_or(false)
+            })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,10 +219,7 @@ pub fn detect<'a>(profiles: &'a [Profile], raw: &[RawMod]) -> Result<&'a Profile
     let best = profiles
         .iter()
         .map(|p| {
-            let hits = raw
-                .iter()
-                .filter(|m| m.metadata_named(&p.metadata_file).is_some())
-                .count();
+            let hits = raw.iter().filter(|m| p.matches(m)).count();
             (p, hits)
         })
         .max_by_key(|(_, hits)| *hits);
@@ -228,7 +257,10 @@ pub fn by_name<'a>(profiles: &'a [Profile], name: &str) -> Result<&'a Profile> {
 /// Every metadata filename any profile might look for — the scanner keeps the
 /// contents of these and only these.
 pub fn metadata_filenames(profiles: &[Profile]) -> BTreeSet<String> {
-    profiles.iter().map(|p| p.metadata_file.clone()).collect()
+    profiles
+        .iter()
+        .filter_map(|p| p.metadata_file.clone())
+        .collect()
 }
 
 #[cfg(test)]

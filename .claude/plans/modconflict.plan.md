@@ -180,7 +180,8 @@ src/
 - [x] Fase 3 — parser Factorio
 - [x] Fase 4 — TUI ratatui
 - [x] Fase 5 — `--json`, load order, **profili di gioco dichiarativi**
-- [ ] Skyrim (formato binario: serve codice, non un profilo)
+- [x] Fase 6 — **layer container binari** (`.bsa`/`.ba2`/`.vpk`/`.pak`)
+- [ ] Livello record: FormID Skyrim via `esplugin`
 
 ## 9. Fase 5 — la generalizzazione
 
@@ -217,3 +218,42 @@ zero ricompilazioni". Fabric, Forge e Farming Simulator sono stati aggiunti cos�
 **Load order**, ora che c'è:
 - i mod disabilitati sono esclusi dall'analisi (non possono confliggere)
 - le sovrapposizioni di file dichiarano *chi vince*, non solo *che esistono*
+
+
+## 10. Fase 6 — i formati binari
+
+I profili leggono metadati testuali. Restava fuori tutto ciò che è binario:
+Skyrim/Fallout (`.bsa`/`.ba2`), Source (`.vpk`), Unreal 4/5 (`.pak`).
+
+**Tentazione da evitare**: un linguaggio dichiarativo per descrivere byte
+(magic, offset, endianness, tabelle di stringhe) dentro il TOML. Sarebbe un
+parser scritto nel linguaggio sbagliato, e ogni formato ha varianti e versioni
+che lo farebbero degenerare.
+
+**Scelta**: il generale non è il parsing, è il *contratto*.
+
+> un container reader prende un file e restituisce i path che contiene
+
+Basta quella risposta per far passare gli archivi binari attraverso *tutti* i
+controlli che il detector già fa. Il risultato concreto: una texture dentro un
+`.bsa` collide con una copia sciolta della stessa texture in un altro mod —
+esattamente l'override che rompe le installazioni Skyrim, e che una scansione
+per nome file non può vedere.
+
+**I parser non sono nostri**: `ba2` (Morrowind→Starfield, testata contro la
+suite C++ di riferimento), `vpk`, `unpak`. Sono loro a inseguire il version
+drift dei formati, che è la parte che marcisce davvero.
+
+Riconoscimento per magic bytes, non per estensione (le estensioni vengono
+rinominate di continuo), limitato a estensioni plausibili per non fare una
+syscall per texture.
+
+**Profilo `creation-engine`**: nessun `metadata_file`, riconoscimento via
+`detect_extensions`. Volutamente **senza** `[load_order]`: `plugins.txt` elenca
+nomi di *plugin*, il nostro id è il nome della *cartella mod*. Mappare l'uno
+sull'altro è compito del mod manager; indovinare significherebbe dichiarare il
+vincitore sbagliato con totale sicurezza.
+
+**Resta fuori**: il livello *record*. Gli archivi contribuiscono la lista file,
+non i FormID. Due plugin che editano lo stesso record è il conflitto classico di
+Skyrim e richiede il parsing del formato plugin — `esplugin`, prossimo passo.

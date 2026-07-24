@@ -9,6 +9,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+
+use crate::container;
 use walkdir::WalkDir;
 
 /// The metadata filenames to keep in memory, which the profiles decide.
@@ -22,8 +24,11 @@ pub struct RawMod {
     pub source: PathBuf,
     /// Internal paths, forward slashes, no leading slash.
     pub files: Vec<String>,
-    /// Contents of the files named in `METADATA_FILES`, keyed by internal path.
+    /// Contents of the metadata files, keyed by internal path.
     pub metadata: HashMap<String, Vec<u8>>,
+    /// Binary archives inside this mod whose contents were expanded into
+    /// `files`, by format name.
+    pub containers: Vec<&'static str>,
 }
 
 impl RawMod {
@@ -45,6 +50,7 @@ impl RawMod {
             source,
             files,
             metadata,
+            containers: Vec::new(),
         }
     }
 
@@ -128,12 +134,14 @@ fn read_archive(path: &Path, names: &MetadataNames) -> Result<RawMod> {
         source: path.to_path_buf(),
         files,
         metadata,
+        containers: Vec::new(),
     })
 }
 
 fn read_folder(root: &Path, names: &MetadataNames) -> Result<RawMod> {
     let mut files = Vec::new();
     let mut metadata = HashMap::new();
+    let mut containers = Vec::new();
 
     for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
@@ -147,6 +155,20 @@ fn read_folder(root: &Path, names: &MetadataNames) -> Result<RawMod> {
         if is_metadata(&name, names) {
             metadata.insert(name.clone(), std::fs::read(entry.path())?);
         }
+        // A binary archive contributes the paths inside it, not just its own
+        // name: that is what makes a texture inside a .bsa collide with a loose
+        // copy of the same texture, which is how the game sees it too.
+        match container::read(entry.path()) {
+            Ok(Some(archive)) => {
+                containers.push(archive.format);
+                files.extend(archive.files);
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!(
+                "warning: cannot read archive {}: {e:#}",
+                entry.path().display()
+            ),
+        }
         files.push(name);
     }
 
@@ -155,6 +177,7 @@ fn read_folder(root: &Path, names: &MetadataNames) -> Result<RawMod> {
         source: root.to_path_buf(),
         files,
         metadata,
+        containers,
     })
 }
 

@@ -1,0 +1,18 @@
+# Skyrim, Fallout, Starfield — Bethesda's Creation Engine.
+#
+# These games ship no text metadata at all: a mod is loose files plus .esp/.esm
+# plugins plus .bsa/.ba2 archives. So there is no metadata_file, and the game is
+# recognised by what the files are.
+#
+# The value here comes from the container layer: the paths inside every .bsa and
+# .ba2 are expanded into the scan, so a texture packed in an archive collides
+# with a loose copy of the same texture — which is exactly the override that
+# bites players, and exactly what a filename-only scan cannot see.
+#
+# Deliberately no [load_order]: plugins.txt lists *plugin* names, while a mod id
+# here is the mod folder name. Mapping one to the other is the mod manager's
+# job, and guessing it would name the wrong winner with total confidence.
+name = "creation-engine"
+display_name = "Skyrim / Fallout / Starfield"
+detect_extensions = ["esp", "esm", "esl", "bsa", "ba2"]
+check_file_overlap = true

@@ -1,4 +1,5 @@
 mod conflict;
+mod container;
 mod loadorder;
 mod model;
 mod parse;
@@ -103,6 +104,10 @@ fn run() -> Result<bool> {
         mods_scanned: mods.len(),
         mods_disabled,
         load_order_known: !load_order.is_empty(),
+        containers: raw
+            .iter()
+            .flat_map(|m| m.containers.iter().map(|c| c.to_string()))
+            .collect(),
         conflicts: &conflicts,
     };
 
@@ -237,6 +242,77 @@ mod tests {
             &conflicts[0],
             Conflict::FileOverlap { winner: None, .. }
         ));
+    }
+
+    /// The point of the container layer: a texture packed inside a `.bsa` and a
+    /// loose copy of the same texture in another mod are the same conflict the
+    /// game sees, and a filename-only scan cannot see it at all.
+    #[test]
+    fn a_file_inside_a_bethesda_archive_collides_with_a_loose_copy() {
+        use crate::testutil::{write_bsa, write_folder_mod};
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Mod one: an archive containing the texture, plus a plugin.
+        let packed = dir.path().join("PackedMod");
+        std::fs::create_dir(&packed).unwrap();
+        std::fs::write(packed.join("Packed.esp"), b"TES4").unwrap();
+        write_bsa(
+            &packed.join("Packed.bsa"),
+            &["textures/armor/iron.dds", "meshes/armor/iron.nif"],
+        );
+
+        // Mod two: the same texture, loose.
+        write_folder_mod(
+            dir.path(),
+            "LooseMod",
+            &[("textures/armor/iron.dds", "different bytes"), ("Loose.esp", "TES4")],
+        );
+
+        let (game, conflicts) = analyze(dir.path(), None);
+
+        assert_eq!(game, "creation-engine");
+        assert_eq!(conflicts.len(), 1);
+        match &conflicts[0] {
+            Conflict::FileOverlap { path, mods, .. } => {
+                assert_eq!(path, "textures/armor/iron.dds");
+                assert_eq!(mods, &["LooseMod".to_string(), "PackedMod".to_string()]);
+            }
+            other => panic!("expected a file overlap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_scan_records_which_binary_archives_it_expanded() {
+        use crate::testutil::write_bsa;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mod_dir = dir.path().join("SomeMod");
+        std::fs::create_dir(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("Some.esp"), b"TES4").unwrap();
+        write_bsa(&mod_dir.join("Some.bsa"), &["textures/a.dds"]);
+
+        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap();
+
+        assert_eq!(raw[0].containers, vec!["Bethesda archive"]);
+        assert!(raw[0].files.iter().any(|f| f == "textures/a.dds"));
+        // The archive itself is still listed alongside its contents.
+        assert!(raw[0].files.iter().any(|f| f == "Some.bsa"));
+    }
+
+    #[test]
+    fn an_unreadable_archive_does_not_sink_the_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let mod_dir = dir.path().join("BrokenMod");
+        std::fs::create_dir(&mod_dir).unwrap();
+        std::fs::write(mod_dir.join("Broken.bsa"), b"BSA\0truncated").unwrap();
+        std::fs::write(mod_dir.join("Broken.esp"), b"TES4").unwrap();
+
+        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap();
+
+        assert_eq!(raw.len(), 1);
+        assert!(raw[0].containers.is_empty());
+        assert!(raw[0].files.iter().any(|f| f == "Broken.esp"));
     }
 
     #[test]

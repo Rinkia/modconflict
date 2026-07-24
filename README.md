@@ -73,6 +73,7 @@ existing ones.
 |-----|---------|
 | `metadata_file` | Filename to look for inside each mod, matched at any depth |
 | `format` | `json`, `toml` or `xml` |
+| `detect_extensions` | Identifies the game when it has no metadata file at all |
 | `root` | Path prefix into the document, e.g. `modDesc` for XML |
 | `id_field` | Path to the mod id. Omit it and the filename is used |
 | `version_field` | Path to the version |
@@ -100,9 +101,38 @@ Two load-order shapes cover the rest:
 - `json` / `toml` — a list of entries with a name field and an enabled field
   (Factorio's `mod-list.json`)
 
-The honest limit: profiles read **text** metadata. A game that hides its mod
-data in a proprietary binary format — Skyrim's `.esp` records, for instance —
-needs real code, and no amount of configuration substitutes for it.
+Profiles read **text** metadata. Games that hide everything in binary archives
+are handled by a second layer — see below.
+
+## Binary archives
+
+Some games ship no text metadata at all. A Skyrim mod is loose files, `.esp`
+plugins and `.bsa` archives; an Unreal game's mods are `.pak` files. A profile
+cannot describe those, and a byte-level description language in TOML would just
+be a parser written in the wrong language.
+
+So the second layer is code — but the *general* part is the contract, not the
+parsing:
+
+> a container reader takes a file and returns the paths inside it.
+
+That one answer is enough to put binary archives through every check the
+detector already does. A texture packed inside a `.bsa` and a loose copy of the
+same texture in another mod now collide in the report exactly the way they
+collide in the game — something a filename-only scan cannot see at all.
+
+The parsers are not ours. They are maintained crates that already track each
+format's version drift, which is the part that actually rots:
+
+| Format | Games | Crate |
+|--------|-------|-------|
+| `.bsa` / `.ba2` | Morrowind through Starfield | [`ba2`](https://crates.io/crates/ba2) |
+| `.vpk` | Source engine | [`vpk`](https://crates.io/crates/vpk) |
+| `.pak` | Unreal Engine 4 and 5 | [`unpak`](https://crates.io/crates/unpak) |
+
+Archives are identified by magic bytes, not by extension, because renamed
+extensions are common. Adding a format is one entry in a table: a sniff
+function and a read function.
 
 ## Install
 
@@ -204,6 +234,7 @@ deliberately, and a checker that cries wolf gets ignored.
 | `minecraft-fabric` | `fabric.mod.json` | `depends` / `recommends` / `breaks` / `conflicts`, `provides` |
 | `minecraft-forge` | `META-INF/mods.toml` | Forge and NeoForge dependency tables |
 | `farming-simulator` | `modDesc.xml` | Mod id comes from the zip filename |
+| `creation-engine` | none — `.esp`/`.bsa` | Skyrim, Fallout, Starfield; archive contents expanded |
 
 `--list-games` prints what your build knows, including your own profiles.
 
@@ -211,6 +242,7 @@ deliberately, and a checker that cries wolf gets ignored.
 
 ```
 scan.rs       walk the folder, open archives, inventory files + metadata bytes
+container.rs  binary archives (.bsa/.ba2/.vpk/.pak) -> the paths inside them
 value.rs      JSON/TOML/XML collapsed into one document tree with dotted paths
 profile.rs    the game profile schema, the built-ins, and autodetection
 parse.rs      Profile + RawMod -> ModEntry     (data-driven, no per-game code)
@@ -234,8 +266,15 @@ anywhere, offline, with no game installed.
 
 ## Known limits
 
-- Binary mod formats (Skyrim's `.esp`/`.esm`) cannot be described by a profile
-  and are not supported yet.
+- Binary archives contribute their *file list*, not their records. Skyrim's
+  FormID-level conflicts — two plugins editing the same record — need the
+  plugin format itself parsed, which is the next step (`esplugin` does it).
+- The Creation Engine profile deliberately has no load order. `plugins.txt`
+  lists plugin names while a mod id here is the mod folder name; mapping one to
+  the other is the mod manager's job, and guessing would name the wrong winner
+  with total confidence.
+- Archives nested inside a `.zip` are not expanded — only archives sitting in a
+  mod folder are.
 - Version comparison is semver. Requirements in another dialect — Forge's
   Maven ranges, for instance — are treated as satisfied rather than guessed at,
   because a false alarm is worse than a miss here.

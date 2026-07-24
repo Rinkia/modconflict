@@ -9,9 +9,14 @@ use crate::scan::RawMod;
 use crate::value::{self, Value};
 
 pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
-    let doc = raw
-        .metadata_named(&profile.metadata_file)
-        .and_then(|bytes| value::load(bytes, profile.format).ok());
+    // No metadata file (Creation Engine) means nothing to parse: the id comes
+    // from the filename and the value is in the file inventory, not the fields.
+    let doc = match (profile.metadata_file.as_deref(), profile.format) {
+        (Some(name), Some(format)) => raw
+            .metadata_named(name)
+            .and_then(|bytes| value::load(bytes, format).ok()),
+        _ => None,
+    };
 
     // A mod whose metadata is missing or malformed still exists on disk and can
     // still collide, so fall back to the filename rather than dropping it.
