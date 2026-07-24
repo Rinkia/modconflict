@@ -439,6 +439,53 @@ What this proves is that the profile matches the format **as documented**. It
 does not prove the documentation matches the mods people actually publish —
 only a corpus of real mods does that, and that is the next step.
 
+## Hostile input
+
+Every file this tool opens was downloaded from the internet by someone who
+wanted a nicer sword. A mod archive can claim ten million entries, or a kilobyte
+that expands to a gigabyte, or nest ten thousand levels deep.
+
+The rule throughout: exceeding a limit is a **warning and a truncation**, never
+a crash and never a silent success. A scan that hits one still reports
+everything it did manage to read, and says what it skipped.
+
+```
+$ modconflict ~/mods
+Factorio: scanned 1 mod
+warning: skipping a.bsa: unexpected end of file
+warning: skipping b.pak: this tool does not support version number 4294967295
+warning: skipping broken.zip: invalid Zip archive: Could not find EOCD
+no conflicts found
+```
+
+Warnings are collected rather than printed to stderr, so `--json` consumers see
+them too, in a `warnings` array.
+
+| Limit | Why |
+|-------|-----|
+| 200,000 entries per zip | An index claiming more is not a mod |
+| 500,000 entries per binary archive | Generous: Bethesda archives really do hold tens of thousands of textures |
+| 8 MB per metadata file | The only place the scanner holds file *contents* rather than paths |
+| 200:1 decompression ratio | 20x is ordinary for JSON, 200x is an attack |
+| 100 levels of document nesting | Real manifests nest a handful |
+
+Third-party parsers run behind a panic boundary. They are good crates, but they
+are parsing hostile binary input, and an index-out-of-bounds deep inside one
+would otherwise take down a scan of two hundred perfectly readable mods. A
+panic costs exactly one archive, and says so.
+
+The nesting limit is checked **before** the XML parser is handed the text, not
+after: `roxmltree` recurses while parsing and overflows the stack on a
+50,000-deep document, and a stack overflow aborts the process rather than
+unwinding into an error anyone could catch. That was a real one-file denial of
+service, found by writing the test above and watching it crash.
+
+Fuzzing proper needs a nightly toolchain and a library target this crate does
+not have. In its place the suite carries a seeded mutation pass: valid manifests
+and archive headers mutated deterministically and fed to every parser, asserting
+only that control comes back. Weaker than a fuzzer at finding new cases,
+stronger at one thing — it runs on every `cargo test`.
+
 ## Known limits
 
 - **No real mod has been through this tool yet.** Every test uses fixtures
@@ -449,6 +496,11 @@ only a corpus of real mods does that, and that is the next step.
   the profiles as informed claims.
 - Bannerlord versions are written `v1.0.0`, which semver cannot read, so its
   version requirements come out unverified rather than wrong.
+- The XML depth guard is a scanner, not a parser: it over-counts on `>` inside
+  attribute values and on angle brackets in comments. Over-counting only makes
+  it stricter, which is the safe direction for something whose job is to run
+  before a parser that would otherwise crash the process.
+- No real fuzzing yet — see above for what stands in for it.
 
 - Record comparison is pairwise and parses every plugin whole, so a very large
   load order costs time and memory. `--no-records` turns it off.

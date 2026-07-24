@@ -38,17 +38,22 @@ pub struct Analysis {
     pub containers: Vec<String>,
     pub plugins_read: usize,
     pub unreadable_plugins: Vec<String>,
+    /// Everything the scan could not read: unopenable archives, metadata that
+    /// blew a limit, entries truncated away. Collected rather than printed so
+    /// they reach the JSON report.
+    pub warnings: Vec<String>,
     pub load_order_known: bool,
     pub conflicts: Vec<Conflict>,
 }
 
 pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
     let profiles = profile::load_all(opts.profiles_dir)?;
-    let raw = scan::scan_dir(path, &profile::metadata_filenames(&profiles))?;
+    let scan = scan::scan_dir(path, &profile::metadata_filenames(&profiles))?;
+    let raw = &scan.mods;
 
     let profile = match opts.game {
         Some(name) => profile::by_name(&profiles, name)?,
-        None => profile::detect(&profiles, &raw)?,
+        None => profile::detect(&profiles, raw)?,
     }
     .clone();
 
@@ -58,7 +63,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
     // The record pass runs before mods are filtered, because it lines the raw
     // mods up against the parsed ones one to one.
     let records = match (&profile.records, opts.skip_records) {
-        (Some(spec), false) => records::scan(spec, &raw, &all_mods),
+        (Some(spec), false) => records::scan(spec, raw, &all_mods),
         _ => records::RecordScan::default(),
     };
     records.enrich(&mut all_mods);
@@ -97,6 +102,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
             .collect(),
         plugins_read: records.plugin_count(),
         unreadable_plugins: records.unreadable.clone(),
+        warnings: scan.warnings,
         load_order_known: !load_order.is_empty(),
         conflicts,
     })
@@ -112,6 +118,7 @@ impl Analysis {
             containers: self.containers.clone(),
             plugins_read: self.plugins_read,
             mods_with_metadata: self.mods_with_metadata,
+            warnings: &self.warnings,
             conflicts: &self.conflicts,
         }
     }

@@ -5,7 +5,10 @@ mod conflict;
 mod corpus;
 #[cfg(test)]
 mod fixtures;
+#[cfg(test)]
+mod hostile;
 mod container;
+mod limits;
 mod loadorder;
 mod model;
 mod parse;
@@ -213,7 +216,7 @@ mod tests {
         // Fabric has no load_order section, so an explicit file is refused
         // rather than silently ignored.
         let profiles = profile::load_all(None).unwrap();
-        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap();
+        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
         let profile = profile::detect(&profiles, &raw).unwrap();
 
         assert_eq!(profile.name, "minecraft-fabric");
@@ -276,7 +279,7 @@ mod tests {
         std::fs::write(mod_dir.join("Some.esp"), b"TES4").unwrap();
         write_bsa(&mod_dir.join("Some.bsa"), &["textures/a.dds"]);
 
-        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap();
+        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
 
         assert_eq!(raw[0].containers, vec!["Bethesda archive"]);
         assert!(raw[0].files.iter().any(|f| f == "textures/a.dds"));
@@ -292,7 +295,7 @@ mod tests {
         std::fs::write(mod_dir.join("Broken.bsa"), b"BSA\0truncated").unwrap();
         std::fs::write(mod_dir.join("Broken.esp"), b"TES4").unwrap();
 
-        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap();
+        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
 
         assert_eq!(raw.len(), 1);
         assert!(raw[0].containers.is_empty());
@@ -352,7 +355,7 @@ mod tests {
         write_zip_mod(dir.path(), "mystery.zip", &[("readme.txt", "hello")]);
 
         let profiles = profile::load_all(None).unwrap();
-        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap();
+        let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
 
         assert!(profile::detect(&profiles, &raw).is_err());
     }

@@ -271,3 +271,42 @@ stesso, incluso il caso "profilo sbagliato deve fallire il check".
 **Resta da fare, e serve una persona con dei mod**: puntare `MODCONFLICT_CORPUS`
 a cartelle vere e tarare. Copertura sotto il 100% su una cartella fidata è un
 bug da scrivere.
+
+
+---
+
+## 12. Fase 10 — fatta
+
+**Una vulnerabilità vera, trovata scrivendo il test e guardandolo crashare.**
+Un XML annidato 50.000 livelli manda in stack overflow `roxmltree::Document::parse`
+*prima* che il nostro codice giri. Uno stack overflow **aborta il processo**:
+`catch_unwind` non lo intercetta. Quindi il controllo di profondità sta a monte
+del parser, come scanner di byte e non come parser — sovrastima su `>` dentro un
+attributo, e sovrastimare è la direzione sicura per una guardia il cui compito è
+girare prima di qualcosa che altrimenti fa cadere il processo.
+
+Il primo tentativo (cap dentro `from_xml`) non serviva a niente: il crash
+avveniva prima. Utile ricordarlo — la difesa va messa dove sta il rischio, non
+dove sta il nostro codice.
+
+**Limiti** (`limits.rs`): 200k voci per zip, 500k per archivio binario, 8 MB per
+file di metadati, rapporto 200:1 come soglia di decompression bomb, 100 livelli
+di annidamento. Superarli è warning + troncamento, mai crash e mai successo
+silenzioso.
+
+**Panic boundary** attorno a `ba2`/`unpak`/`vpk`/`esplugin`: un panic costa un
+archivio, non la scansione di duecento mod leggibili.
+
+**Warning raccolti invece che stampati** — arrivano al report testuale *e* al
+JSON (campo `warnings`). Era un pezzo della Fase 13, tirato avanti perché senza
+non si può *testare* che un limite sia scattato.
+
+**Fuzzing**: `cargo-fuzz` vuole nightly e un target `lib` che questo crate non
+ha. Al suo posto un passo di mutazione deterministico (seed fisso, quindi
+riproducibile) nella suite normale. Più debole di un fuzzer nel trovare casi
+nuovi, più forte in una cosa: gira a ogni `cargo test`.
+
+**Gli snapshot hanno pagato di nuovo**: hanno intercettato il cambio di
+contratto JSON (campo `warnings` nuovo) invece di lasciarlo passare.
+
+**Prossima**: Fase 8 (hashing) o 11 (mod manager). La 13 è per metà già fatta.

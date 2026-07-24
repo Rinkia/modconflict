@@ -9,6 +9,7 @@
   "mods_with_metadata": 3,
   "conflict_count": 2,
   "critical_count": 2,
+  "warnings": [],
   "conflicts": [
     {
       "severity": "critical",

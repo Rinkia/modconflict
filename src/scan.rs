@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::container;
+use crate::limits;
 use walkdir::WalkDir;
 
 /// The metadata filenames to keep in memory, which the profiles decide.
@@ -75,33 +76,45 @@ impl RawMod {
 /// top level is treated as one mod. Unreadable entries are skipped with a
 /// warning rather than aborting the whole scan — one corrupt archive should not
 /// hide the other 200 mods' conflicts.
-pub fn scan_dir(dir: &Path, names: &MetadataNames) -> Result<Vec<RawMod>> {
+/// What a scan found, plus everything it could not read.
+///
+/// Warnings are returned rather than printed so they reach the JSON report and
+/// so a test can assert that a limit actually fired.
+#[derive(Debug, Default)]
+pub struct Scan {
+    pub mods: Vec<RawMod>,
+    pub warnings: Vec<String>,
+}
+
+pub fn scan_dir(dir: &Path, names: &MetadataNames) -> Result<Scan> {
     let entries = std::fs::read_dir(dir)
         .with_context(|| format!("cannot read mod folder {}", dir.display()))?;
 
-    let mut mods = Vec::new();
+    let mut scan = Scan::default();
     for entry in entries {
         let path = entry?.path();
         let result = if is_archive(&path) {
-            read_archive(&path, names)
+            read_archive(&path, names, &mut scan.warnings)
         } else if path.is_dir() {
-            read_folder(&path, names)
+            read_folder(&path, names, &mut scan.warnings)
         } else if container::is_candidate(&path) {
             // A .pak or .bsa lying directly in the mods folder is the mod, not
             // a file inside one — which is how BG3 and most Unreal games ship.
-            read_container(&path)
+            read_container(&path, &mut scan.warnings)
         } else {
             continue;
         };
 
         match result {
-            Ok(m) => mods.push(m),
-            Err(e) => eprintln!("warning: skipping {}: {e:#}", path.display()),
+            Ok(m) => scan.mods.push(m),
+            Err(e) => scan
+                .warnings
+                .push(format!("skipping {}: {e:#}", path.display())),
         }
     }
 
-    mods.sort_by(|a, b| a.source.cmp(&b.source));
-    Ok(mods)
+    scan.mods.sort_by(|a, b| a.source.cmp(&b.source));
+    Ok(scan)
 }
 
 fn is_archive(path: &Path) -> bool {
@@ -111,14 +124,24 @@ fn is_archive(path: &Path) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "zip" | "jar")
 }
 
-fn read_archive(path: &Path, names: &MetadataNames) -> Result<RawMod> {
+fn read_archive(path: &Path, names: &MetadataNames, warnings: &mut Vec<String>) -> Result<RawMod> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
 
     let mut files = Vec::new();
     let mut metadata = HashMap::new();
 
-    for i in 0..zip.len() {
+    let entry_count = zip.len().min(limits::MAX_ARCHIVE_ENTRIES);
+    if zip.len() > limits::MAX_ARCHIVE_ENTRIES {
+        warnings.push(format!(
+            "{}: claims {} entries, reading the first {}",
+            path.display(),
+            zip.len(),
+            limits::MAX_ARCHIVE_ENTRIES
+        ));
+    }
+
+    for i in 0..entry_count {
         let mut entry = zip.by_index(i)?;
         if entry.is_dir() {
             continue;
@@ -126,9 +149,21 @@ fn read_archive(path: &Path, names: &MetadataNames) -> Result<RawMod> {
         let name = normalize(entry.name());
 
         if is_metadata(&name, names) {
-            let mut buf = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut buf)?;
-            metadata.insert(name.clone(), buf);
+            match metadata_refusal(entry.size(), entry.compressed_size()) {
+                Some(reason) => {
+                    warnings.push(format!("{}: skipping {name}: {reason}", path.display()))
+                }
+                None => {
+                    // The read is bounded as well as the check: a header that
+                    // lies about its size must not become an allocation.
+                    let mut buf = Vec::new();
+                    entry
+                        .by_ref()
+                        .take(limits::MAX_METADATA_BYTES)
+                        .read_to_end(&mut buf)?;
+                    metadata.insert(name.clone(), buf);
+                }
+            }
         }
         files.push(name);
     }
@@ -142,9 +177,10 @@ fn read_archive(path: &Path, names: &MetadataNames) -> Result<RawMod> {
     })
 }
 
-fn read_container(path: &Path) -> Result<RawMod> {
-    let archive = container::read(path)?
+fn read_container(path: &Path, warnings: &mut Vec<String>) -> Result<RawMod> {
+    let mut archive = container::read(path)?
         .ok_or_else(|| anyhow::anyhow!("not a container after all"))?;
+    truncate_container(path, &mut archive, warnings);
 
     Ok(RawMod {
         source: path.to_path_buf(),
@@ -154,7 +190,34 @@ fn read_container(path: &Path) -> Result<RawMod> {
     })
 }
 
-fn read_folder(root: &Path, names: &MetadataNames) -> Result<RawMod> {
+/// Why a metadata entry must not be read, if it must not.
+fn metadata_refusal(uncompressed: u64, compressed: u64) -> Option<String> {
+    if limits::is_decompression_bomb(uncompressed, compressed) {
+        return Some(format!(
+            "{uncompressed} bytes from {compressed} compressed looks like a decompression bomb"
+        ));
+    }
+    (uncompressed > limits::MAX_METADATA_BYTES).then(|| {
+        format!(
+            "{uncompressed} bytes is too large for a metadata file (limit {})",
+            limits::MAX_METADATA_BYTES
+        )
+    })
+}
+
+fn truncate_container(path: &Path, archive: &mut container::Container, warnings: &mut Vec<String>) {
+    if archive.files.len() > limits::MAX_CONTAINER_ENTRIES {
+        warnings.push(format!(
+            "{}: archive lists {} entries, keeping the first {}",
+            path.display(),
+            archive.files.len(),
+            limits::MAX_CONTAINER_ENTRIES
+        ));
+        archive.files.truncate(limits::MAX_CONTAINER_ENTRIES);
+    }
+}
+
+fn read_folder(root: &Path, names: &MetadataNames, warnings: &mut Vec<String>) -> Result<RawMod> {
     let mut files = Vec::new();
     let mut metadata = HashMap::new();
     let mut containers = Vec::new();
@@ -169,21 +232,28 @@ fn read_folder(root: &Path, names: &MetadataNames) -> Result<RawMod> {
         let name = normalize(&rel.to_string_lossy());
 
         if is_metadata(&name, names) {
-            metadata.insert(name.clone(), std::fs::read(entry.path())?);
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            match metadata_refusal(size, size) {
+                Some(reason) => warnings.push(format!("{}: {reason}", entry.path().display())),
+                None => {
+                    metadata.insert(name.clone(), std::fs::read(entry.path())?);
+                }
+            }
         }
         // A binary archive contributes the paths inside it, not just its own
         // name: that is what makes a texture inside a .bsa collide with a loose
         // copy of the same texture, which is how the game sees it too.
         match container::read(entry.path()) {
-            Ok(Some(archive)) => {
+            Ok(Some(mut archive)) => {
+                truncate_container(entry.path(), &mut archive, warnings);
                 containers.push(archive.format);
                 files.extend(archive.files);
             }
             Ok(None) => {}
-            Err(e) => eprintln!(
-                "warning: cannot read archive {}: {e:#}",
+            Err(e) => warnings.push(format!(
+                "cannot read archive {}: {e:#}",
                 entry.path().display()
-            ),
+            )),
         }
         files.push(name);
     }
@@ -224,7 +294,7 @@ mod tests {
         write_zip_mod(dir.path(), "alpha_1.0.0.zip", &[("alpha/data.lua", "-- a")]);
         write_folder_mod(dir.path(), "beta_1.0.0", &[("data.lua", "-- b")]);
 
-        let mods = scan_dir(dir.path(), &metadata_names()).unwrap();
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap().mods;
 
         assert_eq!(mods.len(), 2);
         assert_eq!(mods[0].files, vec!["alpha/data.lua"]);
@@ -243,7 +313,7 @@ mod tests {
             ],
         );
 
-        let mods = scan_dir(dir.path(), &metadata_names()).unwrap();
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap().mods;
 
         assert_eq!(mods[0].files.len(), 2);
         assert_eq!(mods[0].metadata.len(), 1);
@@ -259,7 +329,7 @@ mod tests {
         std::fs::write(dir.path().join("broken.zip"), b"not actually a zip").unwrap();
         write_zip_mod(dir.path(), "good_1.0.0.zip", &[("good/data.lua", "-- ok")]);
 
-        let mods = scan_dir(dir.path(), &metadata_names()).unwrap();
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap().mods;
 
         assert_eq!(mods.len(), 1);
         assert_eq!(mods[0].source_name(), "good_1.0.0.zip");

@@ -19,6 +19,9 @@ pub struct Report<'a> {
     /// `mods_scanned` means the profile is wrong for this folder, not that the
     /// folder is clean.
     pub mods_with_metadata: usize,
+    /// Everything that could not be read. Reported rather than printed to
+    /// stderr, so a `--json` consumer sees it too.
+    pub warnings: &'a [String],
     pub conflicts: &'a [Conflict],
 }
 
@@ -61,9 +64,10 @@ pub fn text(report: &Report) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{}: scanned {} mods{}",
+        "{}: scanned {} {}{}",
         report.profile.display_name,
         report.mods_scanned,
+        if report.mods_scanned == 1 { "mod" } else { "mods" },
         match report.mods_disabled {
             0 => String::new(),
             n => format!(" ({n} disabled, skipped)"),
@@ -98,6 +102,10 @@ pub fn text(report: &Report) -> String {
             report.mods_scanned,
             report.metadata_coverage() * 100.0
         );
+    }
+
+    for warning in report.warnings {
+        let _ = writeln!(out, "warning: {warning}");
     }
 
     if !report.load_order_known && report.profile.load_order.is_some() {
@@ -144,6 +152,7 @@ struct JsonReport<'a> {
     mods_with_metadata: usize,
     conflict_count: usize,
     critical_count: usize,
+    warnings: &'a [String],
     conflicts: Vec<JsonConflict<'a>>,
 }
 
@@ -168,6 +177,7 @@ pub fn json(report: &Report) -> anyhow::Result<String> {
         mods_with_metadata: report.mods_with_metadata,
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
+        warnings: report.warnings,
         conflicts: report
             .conflicts
             .iter()
@@ -263,6 +273,7 @@ mod tests {
             containers: Vec::new(),
             plugins_read: 0,
             mods_with_metadata: 3,
+            warnings: &[],
             conflicts: &conflicts,
         };
 
@@ -292,6 +303,7 @@ mod tests {
             containers: Vec::new(),
             plugins_read: 0,
             mods_with_metadata: 3,
+            warnings: &[],
             conflicts: &conflicts,
         };
 
@@ -313,6 +325,7 @@ mod tests {
             containers: Vec::new(),
             plugins_read: 0,
             mods_with_metadata: 3,
+            warnings: &[],
             conflicts: &conflicts,
         };
 

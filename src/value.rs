@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+
+use crate::limits;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -38,10 +40,26 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Value> {
         )),
         Format::Toml => Ok(from_toml(&text.parse().context("invalid TOML")?)),
         Format::Xml => {
-            let doc = roxmltree::Document::parse(text).context("invalid XML")?;
+            // Checked before parsing, not after: roxmltree recurses while
+            // parsing, and a stack overflow aborts the process rather than
+            // unwinding into an error anyone could catch.
+            let depth = limits::max_xml_depth(text);
+            if depth > limits::MAX_DOCUMENT_DEPTH {
+                bail!(
+                    "XML nested about {depth} levels deep, past the limit of {}.                      No real manifest is, and parsing it would crash the process.",
+                    limits::MAX_DOCUMENT_DEPTH
+                );
+            }
+
+            let options = roxmltree::ParsingOptions {
+                nodes_limit: limits::MAX_XML_NODES,
+                ..Default::default()
+            };
+            let doc =
+                roxmltree::Document::parse_with_options(text, options).context("invalid XML")?;
             let root = doc.root_element();
             let mut map = BTreeMap::new();
-            map.insert(root.tag_name().name().to_string(), from_xml(root));
+            map.insert(root.tag_name().name().to_string(), from_xml(root, 0)?);
             Ok(Value::Map(map))
         }
     }
@@ -132,13 +150,22 @@ fn from_toml(value: &toml::Value) -> Value {
 /// Attributes become `@name` keys, child elements become keys by tag name
 /// (repeated tags collapse into a list), and text content becomes the value
 /// itself when the element has nothing else.
-fn from_xml(node: roxmltree::Node) -> Value {
+fn from_xml(node: roxmltree::Node, depth: usize) -> Result<Value> {
+    // roxmltree itself parses into a flat arena and does not care how deep the
+    // document is; this conversion recurses, so the limit lives here.
+    if depth > limits::MAX_DOCUMENT_DEPTH {
+        bail!(
+            "XML nested deeper than {} levels, which no real manifest is",
+            limits::MAX_DOCUMENT_DEPTH
+        );
+    }
+
     let text = node.text().map(str::trim).unwrap_or_default();
     let has_children = node.children().any(|c| c.is_element());
     let has_attributes = node.attributes().next().is_some();
 
     if !has_children && !has_attributes {
-        return Value::Str(text.to_string());
+        return Ok(Value::Str(text.to_string()));
     }
 
     let mut map: BTreeMap<String, Value> = BTreeMap::new();
@@ -150,7 +177,7 @@ fn from_xml(node: roxmltree::Node) -> Value {
     }
     for child in node.children().filter(|c| c.is_element()) {
         let key = child.tag_name().name().to_string();
-        let value = from_xml(child);
+        let value = from_xml(child, depth + 1)?;
         match map.remove(&key) {
             Some(Value::List(mut existing)) => {
                 existing.push(value);
@@ -164,7 +191,7 @@ fn from_xml(node: roxmltree::Node) -> Value {
             }
         }
     }
-    Value::Map(map)
+    Ok(Value::Map(map))
 }
 
 #[cfg(test)]
@@ -263,6 +290,26 @@ mod tests {
         let v = load(with_bom.as_bytes(), Format::Json).unwrap();
 
         assert_eq!(v.get_str("name"), Some("alpha"));
+    }
+
+    #[test]
+    fn xml_nested_past_the_limit_is_an_error_rather_than_a_stack_overflow() {
+        let depth = limits::MAX_DOCUMENT_DEPTH + 5;
+        let xml = format!("{}x{}", "<a>".repeat(depth), "</a>".repeat(depth));
+
+        let err = load(xml.as_bytes(), Format::Xml).unwrap_err();
+
+        assert!(format!("{err:#}").contains("past the limit"), "{err:#}");
+    }
+
+    #[test]
+    fn xml_nested_within_the_limit_still_parses() {
+        let depth = 20;
+        let xml = format!("{}deep{}", "<a>".repeat(depth), "</a>".repeat(depth));
+
+        let value = load(xml.as_bytes(), Format::Xml).unwrap();
+
+        assert_eq!(value.get_str(&vec!["a"; depth].join(".")), Some("deep"));
     }
 
     #[test]

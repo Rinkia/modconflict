@@ -139,12 +139,24 @@ pub fn scan(spec: &RecordSpec, raw: &[RawMod], mods: &[ModEntry]) -> RecordScan 
     result
 }
 
-fn load(game: GameId, path: &Path) -> Result<Plugin, esplugin::Error> {
-    let mut plugin = Plugin::new(game, path);
-    // ponytail: whole-plugin parse holds every record id in memory — a few
-    // hundred MB for a 200-plugin load order. Stream it only if that bites.
-    plugin.parse_file(ParseOptions::whole_plugin())?;
-    Ok(plugin)
+/// Behind a panic boundary for the same reason the container readers are: a
+/// plugin is hostile binary input, and one malformed file must not cost the
+/// other two hundred.
+fn load(game: GameId, path: &Path) -> anyhow::Result<Plugin> {
+    let owned = path.to_path_buf();
+    let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let mut plugin = Plugin::new(game, &owned);
+        // ponytail: whole-plugin parse holds every record id in memory — a few
+        // hundred MB for a 200-plugin load order. Stream it only if that bites.
+        plugin.parse_file(ParseOptions::whole_plugin())?;
+        Ok::<_, esplugin::Error>(plugin)
+    }));
+
+    match parsed {
+        Ok(Ok(plugin)) => Ok(plugin),
+        Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
+        Err(_) => anyhow::bail!("the plugin parser panicked on this file"),
+    }
 }
 
 /// FormIDs are stored relative to each plugin's own master list, so they mean
@@ -227,7 +239,7 @@ mod tests {
 
     fn run(dir: &Path) -> (RecordScan, Vec<ModEntry>) {
         let profile = creation_engine();
-        let raw = scanner::scan_dir(dir, &metadata_names()).unwrap();
+        let raw = scanner::scan_dir(dir, &metadata_names()).unwrap().mods;
         let mut mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(&profile, m)).collect();
         let spec = profile.records.clone().unwrap();
         let scan = scan(&spec, &raw, &mods);
