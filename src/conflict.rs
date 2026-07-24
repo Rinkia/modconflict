@@ -1,20 +1,21 @@
 //! Conflict detection. Pure function of `Vec<ModEntry>` — no I/O, no game
 //! knowledge, fully testable without touching the filesystem.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::loadorder::LoadOrder;
 use crate::model::{Conflict, Dep, DepKind, ModEntry, Symbol};
 
 /// Paths that collide in practically every mod and never mean anything.
+///
+/// Every profile's own metadata filename is added to this at runtime — a file
+/// each mod of a game is *required* to ship is boring by definition, and
+/// hardcoding the list here would go stale with every new profile.
 const BORING_PATHS: &[&str] = &[
     "META-INF/MANIFEST.MF",
-    "META-INF/mods.toml",
     "pack.mcmeta",
-    "fabric.mod.json",
-    "info.json",
-    "modDesc.xml",
     "LICENSE",
+    "LICENSE.txt",
     "README.md",
 ];
 
@@ -26,13 +27,16 @@ pub struct DetectOptions {
     /// Used to name the winner of a file overlap. Empty when the game has no
     /// load order file, or the file was not found.
     pub load_order: LoadOrder,
+    /// Metadata filenames every mod of this game carries, which therefore
+    /// overlap everywhere and mean nothing.
+    pub metadata_names: BTreeSet<String>,
 }
 
 pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
 
     if opts.check_file_overlap {
-        conflicts.extend(file_overlaps(mods, &opts.load_order));
+        conflicts.extend(file_overlaps(mods, opts));
     }
     conflicts.extend(duplicate_ids(mods));
     conflicts.extend(dependency_problems(mods));
@@ -46,11 +50,11 @@ pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
     conflicts
 }
 
-fn file_overlaps(mods: &[ModEntry], load_order: &LoadOrder) -> Vec<Conflict> {
+fn file_overlaps(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
     let mut by_path: HashMap<&str, Vec<String>> = HashMap::new();
     for m in mods {
         for f in &m.files {
-            if is_boring(f) {
+            if is_boring(f, &opts.metadata_names) {
                 continue;
             }
             by_path.entry(f.as_str()).or_default().push(m.id.clone());
@@ -62,7 +66,7 @@ fn file_overlaps(mods: &[ModEntry], load_order: &LoadOrder) -> Vec<Conflict> {
         .filter(|(_, owners)| owners.len() > 1)
         .map(|(path, mut owners)| {
             owners.sort();
-            let winner = load_order.winner(&owners).cloned();
+            let winner = opts.load_order.winner(&owners).cloned();
             Conflict::FileOverlap {
                 path: path.to_string(),
                 mods: owners,
@@ -74,7 +78,11 @@ fn file_overlaps(mods: &[ModEntry], load_order: &LoadOrder) -> Vec<Conflict> {
     out
 }
 
-fn is_boring(path: &str) -> bool {
+fn is_boring(path: &str, metadata_names: &BTreeSet<String>) -> bool {
+    let basename = path.rsplit('/').next().unwrap_or(path);
+    if metadata_names.contains(basename) {
+        return true;
+    }
     BORING_PATHS
         .iter()
         .any(|b| path == *b || path.ends_with(&format!("/{b}")))
@@ -183,6 +191,7 @@ mod tests {
         DetectOptions {
             check_file_overlap: true,
             load_order: LoadOrder::default(),
+            metadata_names: Default::default(),
         }
     }
 
@@ -193,6 +202,7 @@ mod tests {
                 order: order.iter().map(|s| s.to_string()).collect(),
                 disabled: Default::default(),
             },
+            metadata_names: Default::default(),
         }
     }
 
@@ -270,6 +280,24 @@ mod tests {
         b.files = vec!["META-INF/MANIFEST.MF".into(), "beta/pack.mcmeta".into()];
 
         assert!(detect(&[a, b], &opts()).is_empty());
+    }
+
+    #[test]
+    fn the_games_own_metadata_filename_is_never_an_overlap() {
+        let mut a = entry("alpha", "1.0.0");
+        let mut b = entry("beta", "1.0.0");
+        // Every Stardew mod ships a manifest.json; saying so every time is noise.
+        a.files = vec!["manifest.json".into()];
+        b.files = vec!["manifest.json".into()];
+
+        let with_names = DetectOptions {
+            metadata_names: ["manifest.json".to_string()].into_iter().collect(),
+            ..opts()
+        };
+
+        assert!(detect(&[a.clone(), b.clone()], &with_names).is_empty());
+        // Without the profile telling it so, it is just another shared path.
+        assert_eq!(detect(&[a, b], &opts()).len(), 1);
     }
 
     #[test]

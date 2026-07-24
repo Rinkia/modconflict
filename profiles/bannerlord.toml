@@ -1,0 +1,22 @@
+# Mount & Blade II: Bannerlord.
+# Format: SubModule.xml, values carried as `value=` / `Id=` attributes.
+#
+# Versions here are written `v1.0.0`, which semver cannot read, so version
+# requirements come out unverified rather than wrong. See the known limits in
+# the README.
+name = "bannerlord"
+display_name = "Mount & Blade II: Bannerlord"
+metadata_file = "SubModule.xml"
+format = "xml"
+root = "Module"
+id_field = "Id.@value"
+version_field = "Version.@value"
+
+[[dependencies]]
+field = "DependedModules.DependedModule"
+syntax = "tables"
+name_field = "@Id"
+version_field = "@DependentVersion"
+optional_field = "@Optional"
+version_prefix = ">="
+kind = "required"

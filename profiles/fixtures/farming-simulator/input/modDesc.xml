@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<modDesc descVersion="60">
+    <author>Someone</author>
+    <version>1.0.0.0</version>
+    <title><en>Cool Mod</en></title>
+    <dependencies>
+        <dependency>FS22_BaseMod</dependency>
+        <dependency>FS22_OtherMod</dependency>
+    </dependencies>
+</modDesc>

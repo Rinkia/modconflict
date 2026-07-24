@@ -1,0 +1,12 @@
+{
+  "source_of_truth": "https://rimworldwiki.com/wiki/Modding_Tutorials/About.xml",
+  "mod_source": "CoolMod",
+  "metadata_path": "About/About.xml",
+  "id": "Someone.CoolMod",
+  "version": "1.2.0",
+  "provides": ["Someone.CoolMod"],
+  "requires": [
+    { "name": "brrainz.harmony", "kind": "required" },
+    { "name": "Someone.OldMod", "kind": "incompatible" }
+  ]
+}

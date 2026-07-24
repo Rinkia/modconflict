@@ -1,0 +1,14 @@
+{
+  "source_of_truth": "https://wiki.factorio.com/Tutorial:Mod_structure",
+  "mod_source": "boblogistics_1.2.3.zip",
+  "metadata_path": "boblogistics_1.2.3/info.json",
+  "id": "boblogistics",
+  "version": "1.2.3",
+  "provides": ["boblogistics"],
+  "requires": [
+    { "name": "base", "req": ">=1.1.0", "kind": "required" },
+    { "name": "bobplates", "kind": "optional" },
+    { "name": "angelsrefining", "kind": "incompatible" },
+    { "name": "bobores", "kind": "required" }
+  ]
+}

@@ -1,0 +1,22 @@
+modLoader = "javafml"
+loaderVersion = "[40,)"
+license = "MIT"
+
+[[mods]]
+modId = "coolmod"
+version = "1.0.0"
+displayName = "Cool Mod"
+
+[[dependencies.coolmod]]
+modId = "forge"
+mandatory = true
+versionRange = "[40,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.coolmod]]
+modId = "jei"
+mandatory = false
+versionRange = "[11,)"
+ordering = "AFTER"
+side = "BOTH"

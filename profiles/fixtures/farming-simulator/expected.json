@@ -1,0 +1,12 @@
+{
+  "source_of_truth": "https://gdn.giants-software.com/documentation_scripting.php modDesc reference",
+  "mod_source": "FS22_CoolMod.zip",
+  "metadata_path": "modDesc.xml",
+  "id": "FS22_CoolMod",
+  "version": "1.0.0.0",
+  "provides": ["FS22_CoolMod"],
+  "requires": [
+    { "name": "FS22_BaseMod", "kind": "required" },
+    { "name": "FS22_OtherMod", "kind": "required" }
+  ]
+}

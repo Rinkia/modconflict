@@ -1,0 +1,12 @@
+{
+  "source_of_truth": "https://docs.minecraftforge.net/en/latest/gettingstarted/modfiles/",
+  "mod_source": "coolmod-1.0.0.jar",
+  "metadata_path": "META-INF/mods.toml",
+  "id": "coolmod",
+  "version": "1.0.0",
+  "provides": ["coolmod"],
+  "requires": [
+    { "name": "forge", "req": "[40,)", "kind": "required" },
+    { "name": "jei", "req": "[11,)", "kind": "optional" }
+  ]
+}

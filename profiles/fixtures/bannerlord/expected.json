@@ -1,0 +1,12 @@
+{
+  "source_of_truth": "SubModule.xml, Bannerlord modding documentation",
+  "mod_source": "CoolMod",
+  "metadata_path": "SubModule.xml",
+  "id": "CoolMod",
+  "version": "v1.0.0",
+  "provides": ["CoolMod"],
+  "requires": [
+    { "name": "Native", "req": ">=v1.2.0", "kind": "required" },
+    { "name": "Sandbox", "req": ">=v1.2.0", "kind": "optional" }
+  ]
+}

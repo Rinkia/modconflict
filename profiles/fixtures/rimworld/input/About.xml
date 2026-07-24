@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+    <packageId>Someone.CoolMod</packageId>
+    <name>Cool Mod</name>
+    <author>Someone</author>
+    <modVersion>1.2.0</modVersion>
+    <supportedVersions>
+        <li>1.5</li>
+    </supportedVersions>
+    <modDependencies>
+        <li>
+            <packageId>brrainz.harmony</packageId>
+            <displayName>Harmony</displayName>
+        </li>
+    </modDependencies>
+    <incompatibleWith>
+        <li>Someone.OldMod</li>
+    </incompatibleWith>
+</ModMetaData>

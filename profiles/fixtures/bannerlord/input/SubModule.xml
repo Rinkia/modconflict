@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+    <Name value="Cool Mod"/>
+    <Id value="CoolMod"/>
+    <Version value="v1.0.0"/>
+    <SingleplayerModule value="true"/>
+    <DependedModules>
+        <DependedModule Id="Native" DependentVersion="v1.2.0"/>
+        <DependedModule Id="Sandbox" DependentVersion="v1.2.0" Optional="true"/>
+    </DependedModules>
+</Module>

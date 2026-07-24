@@ -1,0 +1,22 @@
+# RimWorld.
+# Format: https://rimworldwiki.com/wiki/Modding_Tutorials/About.xml
+name = "rimworld"
+display_name = "RimWorld"
+metadata_file = "About.xml"
+format = "xml"
+root = "ModMetaData"
+id_field = "packageId"
+version_field = "modVersion"
+
+[[dependencies]]
+field = "modDependencies.li"
+syntax = "tables"
+name_field = "packageId"
+kind = "required"
+
+# Plain names, same syntax as a dependency list — only the meaning is inverted,
+# which is what `kind` on the source is for.
+[[dependencies]]
+field = "incompatibleWith.li"
+syntax = "prefixed-strings"
+kind = "incompatible"

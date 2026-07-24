@@ -1,0 +1,13 @@
+{
+  "source_of_truth": "https://stardewvalleywiki.com/Modding:Modder_Guide/APIs/Manifest",
+  "mod_source": "CoolMod",
+  "metadata_path": "manifest.json",
+  "id": "Someone.CoolMod",
+  "version": "1.4.0",
+  "provides": ["Someone.CoolMod"],
+  "requires": [
+    { "name": "spacechase0.SpaceCore", "req": ">=1.20.0", "kind": "required" },
+    { "name": "furyx639.ExpandedStorage", "kind": "optional" },
+    { "name": "Pathoschild.ContentPatcher", "req": ">=1.30.0", "kind": "required" }
+  ]
+}

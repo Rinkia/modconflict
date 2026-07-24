@@ -1,0 +1,14 @@
+{
+  "Name": "Cool Mod",
+  "Author": "Someone",
+  "Version": "1.4.0",
+  "Description": "Does cool things.",
+  "UniqueID": "Someone.CoolMod",
+  "EntryDll": "CoolMod.dll",
+  "MinimumApiVersion": "3.18.0",
+  "ContentPackFor": { "UniqueID": "Pathoschild.ContentPatcher", "MinimumVersion": "1.30.0" },
+  "Dependencies": [
+    { "UniqueID": "spacechase0.SpaceCore", "MinimumVersion": "1.20.0", "IsRequired": true },
+    { "UniqueID": "furyx639.ExpandedStorage", "IsRequired": false }
+  ]
+}

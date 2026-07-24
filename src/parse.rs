@@ -81,7 +81,7 @@ fn read_dependencies(doc: &Value, source: &DependencySource) -> Vec<Dep> {
             .flat_map(Value::items)
             .filter_map(Value::as_str)
             .filter(|s| !s.trim().is_empty())
-            .map(parse_prefixed_dep)
+            .map(|raw| parse_prefixed_dep(raw, source.kind.into()))
             .collect(),
 
         DepSyntax::Map => doc
@@ -94,7 +94,7 @@ fn read_dependencies(doc: &Value, source: &DependencySource) -> Vec<Dep> {
             .flat_map(|m| m.iter())
             .map(|(name, req)| Dep {
                 name: name.clone(),
-                req: normalize_req(req.as_str()),
+                req: normalize_req(req.as_str(), source),
                 kind: source.kind.into(),
             })
             .collect(),
@@ -114,11 +114,13 @@ fn read_dep_table(table: &Value, source: &DependencySource) -> Option<Dep> {
         .version_field
         .as_deref()
         .and_then(|f| table.get_str(f))
-        .and_then(|r| normalize_req(Some(r)));
+        .and_then(|r| normalize_req(Some(r), source));
 
-    // A `false` in the required field downgrades the whole entry to optional.
-    let kind = match source.required_field.as_deref().and_then(|f| table.get_str(f)) {
-        Some("false") => DepKind::Optional,
+    // Either spelling of "this one is optional" downgrades the entry.
+    let required = source.required_field.as_deref().and_then(|f| table.get_str(f));
+    let optional = source.optional_field.as_deref().and_then(|f| table.get_str(f));
+    let kind = match (required, optional) {
+        (Some("false"), _) | (_, Some("true")) => DepKind::Optional,
         _ => source.kind.into(),
     };
 
@@ -131,12 +133,22 @@ fn read_dep_table(table: &Value, source: &DependencySource) -> Option<Dep> {
 
 /// `*` and empty strings mean "any version" — carrying them as a requirement
 /// would only invite a pointless parse later.
-fn normalize_req(raw: Option<&str>) -> Option<String> {
+///
+/// `version_prefix` turns a bare version into a requirement. Without it a
+/// minimum-version field reads as an exact-ish match and rejects every later
+/// major version.
+fn normalize_req(raw: Option<&str>, source: &DependencySource) -> Option<String> {
     let trimmed = raw?.trim();
     if trimmed.is_empty() || trimmed == "*" {
         return None;
     }
-    Some(trimmed.to_string())
+    match source.version_prefix.as_deref() {
+        // Already a requirement: leave it alone.
+        Some(prefix) if !trimmed.starts_with(['>', '<', '=', '^', '~', '[', '(']) => {
+            Some(format!("{prefix}{trimmed}"))
+        }
+        _ => Some(trimmed.to_string()),
+    }
 }
 
 impl From<DeclaredKind> for DepKind {
@@ -156,9 +168,10 @@ impl From<DeclaredKind> for DepKind {
 ///   `! incompatible`  must not be installed
 ///   `~ no-load-order` required, does not affect load order
 ///
-/// A plain name with no prefix and no comparator is a required dependency on
-/// any version, which is also how simpler games (Farming Simulator) spell it.
-fn parse_prefixed_dep(raw: &str) -> Dep {
+/// A plain name with no prefix takes `default_kind`: for Farming Simulator that
+/// is a required dependency, for RimWorld's `incompatibleWith` list the very
+/// same syntax means the opposite.
+fn parse_prefixed_dep(raw: &str, default_kind: DepKind) -> Dep {
     let text = raw.trim();
 
     let (kind, rest) = if let Some(r) = text.strip_prefix("(?)") {
@@ -170,7 +183,7 @@ fn parse_prefixed_dep(raw: &str) -> Dep {
     } else if let Some(r) = text.strip_prefix('~') {
         (DepKind::Required, r)
     } else {
-        (DepKind::Required, text)
+        (default_kind, text)
     };
 
     let (name, req) = split_version_req(rest.trim());
@@ -357,7 +370,7 @@ versionRange = "[9,)"
 
     #[test]
     fn keeps_spaces_inside_mod_names() {
-        let dep = parse_prefixed_dep("? Squeak Through >= 1.8");
+        let dep = parse_prefixed_dep("? Squeak Through >= 1.8", DepKind::Required);
 
         assert_eq!(dep.name, "Squeak Through");
         assert_eq!(dep.req.as_deref(), Some(">=1.8"));

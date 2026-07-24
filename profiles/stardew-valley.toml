@@ -1,0 +1,27 @@
+# Stardew Valley, SMAPI loader.
+# Format: https://stardewvalleywiki.com/Modding:Modder_Guide/APIs/Manifest
+name = "stardew-valley"
+display_name = "Stardew Valley (SMAPI)"
+metadata_file = "manifest.json"
+format = "json"
+id_field = "UniqueID"
+version_field = "Version"
+
+# `MinimumVersion` is a floor, not a requirement. Read literally, semver would
+# take "1.30.0" for "^1.30.0" and reject every later major version.
+[[dependencies]]
+field = "Dependencies"
+syntax = "tables"
+name_field = "UniqueID"
+version_field = "MinimumVersion"
+required_field = "IsRequired"
+version_prefix = ">="
+
+# A content pack cannot load without the mod it is a pack for.
+[[dependencies]]
+field = "ContentPackFor"
+syntax = "tables"
+name_field = "UniqueID"
+version_field = "MinimumVersion"
+version_prefix = ">="
+kind = "required"

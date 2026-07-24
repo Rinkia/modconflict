@@ -1,4 +1,6 @@
 mod conflict;
+#[cfg(test)]
+mod fixtures;
 mod container;
 mod loadorder;
 mod model;
@@ -113,6 +115,7 @@ fn run() -> Result<bool> {
     let options = DetectOptions {
         check_file_overlap: profile.check_file_overlap,
         load_order: load_order.clone(),
+        metadata_names: profile::metadata_filenames(std::slice::from_ref(profile)),
     };
     let mut conflicts = conflict::detect(&mods, &options);
 
@@ -170,6 +173,7 @@ mod tests {
         let options = DetectOptions {
             check_file_overlap: profile.check_file_overlap,
             load_order: order,
+            metadata_names: profile::metadata_filenames(std::slice::from_ref(profile)),
         };
         (profile.name.clone(), conflict::detect(&mods, &options))
     }

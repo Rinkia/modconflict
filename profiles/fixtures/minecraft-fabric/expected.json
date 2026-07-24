@@ -1,0 +1,14 @@
+{
+  "source_of_truth": "https://fabricmc.net/wiki/documentation:fabric_mod_json",
+  "mod_source": "coolmod-2.0.0.jar",
+  "metadata_path": "fabric.mod.json",
+  "id": "coolmod",
+  "version": "2.0.0",
+  "provides": ["coolmod", "coolmod-api"],
+  "requires": [
+    { "name": "fabricloader", "req": ">=0.14.0", "kind": "required" },
+    { "name": "minecraft", "kind": "required" },
+    { "name": "sodium", "req": ">=0.5.0", "kind": "optional" },
+    { "name": "badmod", "kind": "incompatible" }
+  ]
+}

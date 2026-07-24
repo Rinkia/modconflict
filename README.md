@@ -91,8 +91,18 @@ Three dependency shapes cover what games actually use:
 - `prefixed-strings` — a list like `["base >= 1.1.0", "? optional", "! breaks"]`
   (Factorio, and plain names for simpler games)
 - `map` — `{"fabricloader": ">=0.14.0"}` (Fabric)
-- `tables` — a list of tables with `name_field` / `version_field` /
-  `required_field` (Forge)
+- `tables` — a list of tables with `name_field` / `version_field` and either
+  `required_field` (`false` means optional, Forge) or `optional_field`
+  (`true` means optional, Bannerlord)
+
+`kind` on a source sets what a plain entry means, so the same
+`prefixed-strings` syntax reads as a dependency list in one place and as
+RimWorld's `incompatibleWith` in another.
+
+`version_prefix` turns a bare version into a requirement. SMAPI's
+`MinimumVersion: "1.2.0"` is a floor; read literally semver takes it for
+`^1.2.0` and rejects every later major version — a false alarm on well-formed
+mods.
 
 Two load-order shapes cover the rest:
 
@@ -278,6 +288,9 @@ deliberately, and a checker that cries wolf gets ignored.
 | `minecraft-fabric` | `fabric.mod.json` | `depends` / `recommends` / `breaks` / `conflicts`, `provides` |
 | `minecraft-forge` | `META-INF/mods.toml` | Forge and NeoForge dependency tables |
 | `farming-simulator` | `modDesc.xml` | Mod id comes from the zip filename |
+| `stardew-valley` | `manifest.json` | SMAPI: `Dependencies`, `ContentPackFor` |
+| `rimworld` | `About/About.xml` | `modDependencies`, `incompatibleWith` |
+| `bannerlord` | `SubModule.xml` | `DependedModules`, attribute-carried values |
 | `creation-engine` | none — `.esp`/`.bsa` | Skyrim, Fallout, Starfield; archives expanded, records compared |
 
 `--list-games` prints what your build knows, including your own profiles.
@@ -309,7 +322,35 @@ cargo clippy --all-targets
 Tests build throwaway zip archives in a temp directory, so the suite runs
 anywhere, offline, with no game installed.
 
+### Every profile must prove itself
+
+A profile is a claim about a game's metadata format, and a wrong claim fails
+*silently*: the mod parses, the id is wrong, and the report is confidently
+useless. So each profile ships a fixture, and the test suite refuses a profile
+that has none:
+
+```
+profiles/fixtures/<profile>/
+  input/<metadata file>     a sample, as the game's own docs describe it
+  expected.json             the exact id, version, provides and requires
+```
+
+`expected.json` carries a `source_of_truth` field naming where the format claim
+comes from, so a wrong fixture can be traced rather than argued about.
+
+What this proves is that the profile matches the format **as documented**. It
+does not prove the documentation matches the mods people actually publish —
+only a corpus of real mods does that, and that is the next step.
+
 ## Known limits
+
+- **No real mod has been through this tool yet.** Every test uses fixtures
+  built from format documentation. The parsing libraries are tested upstream,
+  but the integration around them — path heuristics, id fallbacks, game
+  detection — is calibrated on invented examples. Treat the profiles as
+  informed claims until a corpus of real mods says otherwise.
+- Bannerlord versions are written `v1.0.0`, which semver cannot read, so its
+  version requirements come out unverified rather than wrong.
 
 - Record comparison is pairwise and parses every plugin whole, so a very large
   load order costs time and memory. `--no-records` turns it off.

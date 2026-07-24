@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "coolmod",
+  "version": "2.0.0",
+  "provides": ["coolmod-api"],
+  "depends": { "fabricloader": ">=0.14.0", "minecraft": "*" },
+  "recommends": { "sodium": ">=0.5.0" },
+  "breaks": { "badmod": "*" }
+}

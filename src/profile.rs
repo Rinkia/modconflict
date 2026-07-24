@@ -36,6 +36,12 @@ const BUILTIN: &[(&str, &str)] = &[
         "creation-engine",
         include_str!("../profiles/creation-engine.toml"),
     ),
+    (
+        "stardew-valley",
+        include_str!("../profiles/stardew-valley.toml"),
+    ),
+    ("rimworld", include_str!("../profiles/rimworld.toml")),
+    ("bannerlord", include_str!("../profiles/bannerlord.toml")),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -153,8 +159,8 @@ pub struct DependencySource {
     /// Path to the dependency collection inside the document.
     pub field: String,
     pub syntax: DepSyntax,
-    /// Kind for every entry in this collection. Ignored by `prefixed-strings`,
-    /// which reads the kind from each entry's prefix.
+    /// Kind for every entry in this collection. For `prefixed-strings` it is
+    /// the default a bare entry gets — an explicit prefix still wins.
     #[serde(default = "required")]
     pub kind: DeclaredKind,
     /// `tables` only: where the name and version requirement live.
@@ -165,6 +171,16 @@ pub struct DependencySource {
     /// `tables` only: a boolean field where `false` means optional.
     #[serde(default)]
     pub required_field: Option<String>,
+    /// `tables` only: the same idea inverted, for formats that spell it
+    /// `Optional="true"` instead.
+    #[serde(default)]
+    pub optional_field: Option<String>,
+    /// Comparator to prepend when the version field holds a bare version
+    /// rather than a requirement. SMAPI's `MinimumVersion: "1.2.0"` means
+    /// `>=1.2.0`; read as-is, semver would take it for `^1.2.0` and reject
+    /// every later major version.
+    #[serde(default)]
+    pub version_prefix: Option<String>,
 }
 
 fn required() -> DeclaredKind {
@@ -175,7 +191,8 @@ fn required() -> DeclaredKind {
 #[serde(rename_all = "kebab-case")]
 pub enum DepSyntax {
     /// A list of strings, optionally prefixed with `?`/`(?)`/`!`/`~` and
-    /// carrying an inline version comparator: `base >= 1.1.0`.
+    /// carrying an inline version comparator: `base >= 1.1.0`. A plain name
+    /// with no prefix takes the source's `kind`.
     PrefixedStrings,
     /// A map of `name -> version requirement`.
     Map,
