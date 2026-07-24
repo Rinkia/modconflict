@@ -237,14 +237,15 @@ Options:
       --profiles <DIR>      Directory of extra game profiles (.toml)
   -m, --manager <MANAGER>   Mod manager governing the folder [mo2, none]
       --no-records          Skip the record-level pass (the slow part)
+      --no-hash             Skip hashing overlapping files
       --list-games          List the games this build knows about
 ```
 
 The game is detected automatically from the mod metadata; `--game` overrides
 it.
 
-Exit codes make it usable as a pre-launch check: `0` clean, `1` conflicts
-found, `2` error.
+Exit codes make it usable as a pre-launch check: `0` nothing actionable, `1`
+something worth looking at, `2` error. `INFO` findings do not fail the check.
 
 ### JSON output
 
@@ -287,6 +288,42 @@ and uses it for two things:
 
 `--load-order <FILE>` points at a specific file when it lives somewhere
 unusual.
+
+## Identical copies are not conflicts
+
+Two mods shipping the same path is a warning. Plenty of them should not be: mod
+packs bundle the same library, authors reupload an unchanged asset, a patch
+ships a file it never touched. Whichever copy the game loads, it gets the same
+file — and a checker that cries wolf gets ignored.
+
+So the overlapping files, and only those, are hashed:
+
+```
+$ modconflict ~/mods
+Minecraft (Fabric): scanned 3 mods
+3 conflicts (0 critical)
+
+[INFO] 3 mods ship an identical assets/shared.png
+[INFO] CoolMod is a duplicate of OtherMod (1 identical file)
+[INFO] CoolModCopy is a duplicate of CoolMod (1 identical file)
+```
+
+```
+$ modconflict ~/mods --no-hash
+[WARN] 3 mods ship assets/shared.png
+```
+
+`INFO` findings **do not fail the exit code**: the first run above exits `0`,
+the second exits `1` over a non-problem. Exiting non-zero over things that
+change nothing in the game is how people learn to ignore an exit code.
+
+A mod whose every file is an identical copy of another's is reported as a
+duplicate install rather than a pile of overlaps — the manifest is excluded from
+that comparison, since it necessarily differs by carrying the id.
+
+The scan itself still never reads file contents. A folder with no overlaps costs
+no reads at all, and `--no-hash` turns even that off. Files inside a binary
+archive cannot be compared this way and are left honestly unresolved.
 
 ## Mod managers
 
@@ -346,6 +383,8 @@ wrong about which mod wins.
 | Declared incompatibility | critical | A mod says it cannot run alongside another installed mod |
 | File overlap | warning | Two mods ship the same internal path — the loser is silently ignored |
 | Record overlap | warning | Two plugins edit the same records — the later one wins them all |
+| Identical overlap | info | The clashing copies are byte-identical, so nothing is at stake |
+| Redundant mod | info | Every file it ships is an identical copy of another mod's |
 
 File overlap is only a warning on purpose: compatibility patches overlap
 deliberately, and a checker that cries wolf gets ignored.
@@ -379,6 +418,7 @@ profile.rs    the game profile schema, the built-ins, and autodetection
 parse.rs      Profile + RawMod -> ModEntry     (data-driven, no per-game code)
 model.rs      ModEntry, Conflict, Severity     (the shared vocabulary)
 conflict.rs   detection: pure function, no I/O (the only logic that matters)
+hash.rs       are the clashing copies the same bytes, or different ones?
 loadorder.rs  who is enabled, and who wins an overlap
 manager.rs    Mod Organizer 2: mod priority and plugin order, read-only
 report.rs     text and JSON output

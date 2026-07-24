@@ -28,6 +28,9 @@ pub struct Options<'a> {
     pub manager: Option<Manager>,
     /// Off to skip the record-level pass, which is the slow part.
     pub skip_records: bool,
+    /// Off to skip hashing overlapping files. Hashing is the only step that
+    /// reads file *contents*, so this is the knob for a very large folder.
+    pub skip_hashing: bool,
 }
 
 pub struct Analysis {
@@ -99,6 +102,19 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
 
     let enabled: HashSet<&str> = mods.iter().map(|m| m.id.as_str()).collect();
     conflicts.extend(records.overlaps(&enabled));
+
+    // After detection, because only the paths that actually clashed are worth
+    // reading. A folder with no overlaps costs no reads at all.
+    let mut warnings = scan.warnings;
+    if !opts.skip_hashing {
+        crate::hash::resolve_identical(
+            &mut conflicts,
+            raw,
+            &mods,
+            &options.metadata_names,
+            &mut warnings,
+        );
+    }
     conflicts.sort_by(|a, b| {
         b.severity()
             .cmp(&a.severity())
@@ -116,7 +132,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
             .collect(),
         plugins_read: records.plugin_count(),
         unreadable_plugins: records.unreadable.clone(),
-        warnings: scan.warnings,
+        warnings,
         load_order_known: !load_order.is_empty(),
         manager: found_manager,
         conflicts,

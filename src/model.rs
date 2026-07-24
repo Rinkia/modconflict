@@ -97,6 +97,9 @@ pub enum Conflict {
         path: String,
         mods: Vec<ModId>,
         winner: Option<ModId>,
+        /// Every copy is byte-identical, so which one wins does not matter.
+        /// `false` also covers "not checked" — see `--no-hash`.
+        identical: bool,
     },
     /// Two or more mods claim the same identifier.
     DuplicateId { symbol: Symbol, mods: Vec<ModId> },
@@ -110,6 +113,14 @@ pub enum Conflict {
     },
     /// A mod declares another installed mod as incompatible.
     Incompatible { mod_id: ModId, other: ModId },
+    /// Every file this mod ships is byte-identical to another mod's. It is a
+    /// duplicate installation, not a conflict, and one of the two is dead
+    /// weight.
+    RedundantMod {
+        mod_id: ModId,
+        duplicate_of: ModId,
+        files: usize,
+    },
     /// Two plugins edit the same records. Normal and often deliberate — it is
     /// how compatibility patches work — but the later plugin's version of every
     /// shared record is the one that survives.
@@ -125,6 +136,12 @@ pub enum Conflict {
 impl Conflict {
     pub fn severity(&self) -> Severity {
         match self {
+            // Identical bytes cannot break anything: whichever copy the game
+            // picks, it gets the same file. Worth saying, never worth acting on.
+            Conflict::FileOverlap {
+                identical: true, ..
+            } => Severity::Info,
+            Conflict::RedundantMod { .. } => Severity::Info,
             // File overlap is often deliberate (compatibility patches), so it
             // never blocks — it only warns.
             Conflict::FileOverlap { .. } | Conflict::RecordOverlap { .. } => Severity::Warning,
@@ -138,9 +155,15 @@ impl Conflict {
     /// One-line label for list views.
     pub fn title(&self) -> String {
         match self {
-            Conflict::FileOverlap { path, mods, winner } => match winner {
-                Some(w) => format!("{} mods ship {} ({w} wins)", mods.len(), path),
-                None => format!("{} mods ship {}", mods.len(), path),
+            Conflict::FileOverlap {
+                path,
+                mods,
+                winner,
+                identical,
+            } => match (identical, winner) {
+                (true, _) => format!("{} mods ship an identical {}", mods.len(), path),
+                (false, Some(w)) => format!("{} mods ship {} ({w} wins)", mods.len(), path),
+                (false, None) => format!("{} mods ship {}", mods.len(), path),
             },
             Conflict::DuplicateId { symbol, mods } => {
                 format!("{} {} claimed by {} mods", symbol.kind, symbol.name, mods.len())
@@ -154,6 +177,14 @@ impl Conflict {
             Conflict::Incompatible { mod_id, other } => {
                 format!("{mod_id} is incompatible with {other}")
             }
+            Conflict::RedundantMod {
+                mod_id,
+                duplicate_of,
+                files,
+            } => format!(
+                "{mod_id} is a duplicate of {duplicate_of} ({files} identical {})",
+                if *files == 1 { "file" } else { "files" }
+            ),
             Conflict::RecordOverlap {
                 plugins,
                 records,
@@ -176,7 +207,23 @@ impl Conflict {
     /// Multi-line explanation with the suggested fix.
     pub fn detail(&self) -> String {
         match self {
-            Conflict::FileOverlap { path, mods, winner } => format!(
+            Conflict::FileOverlap {
+                path,
+                mods,
+                winner,
+                identical: true,
+            } => format!(
+                "Path: {path}\n\nProvided by:\n{}\n\nEvery copy is byte-identical, so whichever \
+                 one the game loads it gets the same file. Nothing to fix{}.",
+                bullets(mods),
+                match winner {
+                    Some(w) => format!(" — \"{w}\" happens to win, and it makes no difference"),
+                    None => String::new(),
+                }
+            ),
+            Conflict::FileOverlap {
+                path, mods, winner, ..
+            } => format!(
                 "Path: {path}\n\nProvided by:\n{}\n\n{}",
                 bullets(mods),
                 match winner {
@@ -219,6 +266,15 @@ impl Conflict {
                 "{mod_id} declares \"{other}\" as incompatible, and {other} is installed.\n\n\
                  Remove one of the two."
             ),
+            Conflict::RedundantMod {
+                mod_id,
+                duplicate_of,
+                files,
+            } => format!(
+                "Every one of {mod_id}'s {files} files is byte-identical to a file in                  \"{duplicate_of}\".
+
+This is the same mod installed twice, not a conflict.                  Removing either one changes nothing about the game and leaves one fewer thing                  to reason about."
+            ),
             Conflict::RecordOverlap {
                 plugins,
                 mods,
@@ -255,6 +311,11 @@ From:
                 vec![mod_id.as_str(), dep.name.as_str()]
             }
             Conflict::Incompatible { mod_id, other } => vec![mod_id.as_str(), other.as_str()],
+            Conflict::RedundantMod {
+                mod_id,
+                duplicate_of,
+                ..
+            } => vec![mod_id.as_str(), duplicate_of.as_str()],
         }
     }
 }

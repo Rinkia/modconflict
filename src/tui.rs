@@ -227,6 +227,7 @@ mod tests {
             path: path.to_string(),
             mods: mods.iter().map(|m| m.to_string()).collect(),
             winner: None,
+            identical: false,
         }
     }
 

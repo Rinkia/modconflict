@@ -1,6 +1,7 @@
 Minecraft (Fabric): scanned 2 mods
-1 conflict (0 critical)
+2 conflicts (0 critical)
 
-[WARN] 2 mods ship assets/stone.png
+[INFO] 2 mods ship an identical assets/stone.png
+[INFO] beta is a duplicate of alpha (1 identical file)
 
 Run with --tui for details.

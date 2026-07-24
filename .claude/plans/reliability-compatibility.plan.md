@@ -346,3 +346,39 @@ Windows. Corretto con `strip_prefix` e strip del BOM, più due regression test
 l'input ostile, e la stessa classe di bug è rientrata dalla finestra con il
 codice nuovo. I test sintetici non lo avevano preso perché li scrivevo in ASCII
 puro.
+
+
+---
+
+## 14. Fase 8 — fatta
+
+**Il problema non era la velocità, era il rumore.** Due mod che spediscono lo
+stesso identico file producevano un warning. Se i byte coincidono, chi vince è
+irrilevante — e un tool che grida al lupo viene ignorato.
+
+Hash BLAKE3 **solo** dei path già segnalati come sovrapposti. La scansione
+continua a non leggere mai contenuti: una cartella senza conflitti costa zero
+letture. `--no-hash` spegne anche quelle.
+
+**`FileOverlap { identical: true }` diventa `Info`**, e — la parte che conta —
+gli `Info` **non fanno fallire l'exit code**. Dimostrato dal vivo: la stessa
+cartella esce `0` con hashing e `1` senza, su un non-problema. Uscire non-zero
+per cose che non cambiano niente nel gioco è come si insegna alla gente a
+ignorare l'exit code.
+
+**`RedundantMod`**: un mod tutti i cui file sono copie identiche di un altro è
+un'installazione doppia, non un conflitto.
+
+**Due difetti trovati dai test, non dal design:**
+1. La regola "tutti i file identici" non poteva mai scattare: il manifest
+   differisce sempre (porta l'id) ed è proprio il file che il detector considera
+   "noioso". Va escluso dal confronto.
+2. Due gemelli veri si accusavano a vicenda — la stessa cosa detta due volte,
+   che si legge come due problemi. Ora la coppia è riportata una volta sola.
+
+**Fuori scope, confermato**: deduplicazione su disco, hardlink, ripacchettamento.
+L'hashing serve a tagliare i falsi allarmi, non a modificare l'installazione.
+
+**Resta**: metà Fase 13 (dialetti di versione — i `warnings` nel JSON sono
+arrivati con la Fase 10), e il corpus reale, che serve ancora una persona con
+dei mod.

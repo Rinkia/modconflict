@@ -39,6 +39,18 @@ impl Report<'_> {
         self.conflicts.is_empty()
     }
 
+    /// Whether anything found is worth doing something about.
+    ///
+    /// `Info` findings — identical copies, duplicate installs — are reported
+    /// but change nothing in the game, so they must not fail a pre-launch
+    /// check. Exiting non-zero over them would train people to ignore the
+    /// exit code.
+    pub fn has_actionable(&self) -> bool {
+        self.conflicts
+            .iter()
+            .any(|c| c.severity() > Severity::Info)
+    }
+
     /// How much of the folder the profile actually understood, 0.0 to 1.0.
     /// The health signal: well below 1.0 means the profile is wrong for this
     /// folder, not that the folder is clean.
@@ -253,6 +265,7 @@ mod tests {
                 path: "assets/stone.png".into(),
                 mods: vec!["beta".into(), "gamma".into()],
                 winner: Some("gamma".into()),
+                identical: false,
             },
         ]
     }

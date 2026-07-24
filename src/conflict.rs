@@ -71,6 +71,8 @@ fn file_overlaps(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
                 path: path.to_string(),
                 mods: owners,
                 winner,
+                // Filled in later, by hashing, and only for paths that clashed.
+                identical: false,
             }
         })
         .collect();
@@ -78,7 +80,7 @@ fn file_overlaps(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
     out
 }
 
-fn is_boring(path: &str, metadata_names: &BTreeSet<String>) -> bool {
+pub fn is_boring(path: &str, metadata_names: &BTreeSet<String>) -> bool {
     let basename = path.rsplit('/').next().unwrap_or(path);
     if metadata_names.contains(basename) {
         return true;
@@ -249,6 +251,7 @@ mod tests {
                 path: "assets/stone.png".into(),
                 mods: vec!["alpha".into(), "beta".into()],
                 winner: None,
+                identical: false,
             }]
         );
     }
@@ -268,6 +271,7 @@ mod tests {
                 path: "assets/stone.png".into(),
                 mods: vec!["alpha".into(), "beta".into()],
                 winner: Some("alpha".into()),
+                identical: false,
             }]
         );
         assert!(found[0].title().contains("alpha wins"));

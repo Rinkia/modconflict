@@ -5,6 +5,7 @@ mod conflict;
 mod corpus;
 #[cfg(test)]
 mod fixtures;
+mod hash;
 #[cfg(test)]
 mod hostile;
 mod container;
@@ -68,6 +69,11 @@ struct Cli {
     #[arg(long)]
     no_records: bool,
 
+    /// Skip hashing overlapping files. Without it, two mods shipping the same
+    /// bytes cannot be told apart from two mods shipping different ones.
+    #[arg(long)]
+    no_hash: bool,
+
     /// List the games this build knows about, and exit.
     #[arg(long)]
     list_games: bool,
@@ -76,7 +82,8 @@ struct Cli {
 fn main() -> ExitCode {
     match run() {
         Ok(clean) if clean => ExitCode::SUCCESS,
-        // Conflicts found: non-zero so this is usable in a pre-launch script.
+        // Something actionable was found: non-zero so this is usable as a
+        // pre-launch check.
         Ok(_) => ExitCode::from(1),
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -104,6 +111,7 @@ fn run() -> Result<bool> {
             profiles_dir: cli.profiles.as_deref(),
             manager: cli.manager,
             skip_records: cli.no_records,
+            skip_hashing: cli.no_hash,
         },
     )?;
 
@@ -119,7 +127,7 @@ fn run() -> Result<bool> {
     } else {
         report::print_text(&report);
     }
-    Ok(report.is_clean())
+    Ok(!report.has_actionable())
 }
 
 #[cfg(test)]
@@ -231,11 +239,10 @@ mod tests {
 
         // Without a load order the overlap is still reported, winner unknown.
         let (_, conflicts) = analyze(dir.path(), None);
-        assert_eq!(conflicts.len(), 1);
-        assert!(matches!(
-            &conflicts[0],
+        assert!(conflicts.iter().any(|c| matches!(
+            c,
             Conflict::FileOverlap { winner: None, .. }
-        ));
+        )));
     }
 
     /// The point of the container layer: a texture packed inside a `.bsa` and a
