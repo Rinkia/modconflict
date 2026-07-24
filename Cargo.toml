@@ -1,0 +1,21 @@
+[package]
+name = "modconflict"
+version = "0.1.0"
+edition = "2021"
+description = "Scan a game mod folder and report conflicts before the game crashes"
+license = "MIT"
+repository = "https://github.com/Rinkia/modconflict"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
