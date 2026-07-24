@@ -22,6 +22,8 @@ pub struct Report<'a> {
     /// Everything that could not be read. Reported rather than printed to
     /// stderr, so a `--json` consumer sees it too.
     pub warnings: &'a [String],
+    /// Name and profile of the mod manager that supplied the ordering.
+    pub manager: Option<(&'a str, &'a str)>,
     pub conflicts: &'a [Conflict],
 }
 
@@ -108,11 +110,18 @@ pub fn text(report: &Report) -> String {
         let _ = writeln!(out, "warning: {warning}");
     }
 
-    if !report.load_order_known && report.profile.load_order.is_some() {
-        let _ = writeln!(
-            out,
-            "note: no load order file found — overlap winners are unknown"
-        );
+    match report.manager {
+        Some((name, profile)) => {
+            let _ = writeln!(out, "load order from {name}, profile \"{profile}\"");
+        }
+        // Only worth saying for a game that has a load order to find.
+        None if !report.load_order_known && report.profile.load_order.is_some() => {
+            let _ = writeln!(
+                out,
+                "note: no load order file found — overlap winners are unknown"
+            );
+        }
+        None => {}
     }
 
     if report.is_clean() {
@@ -153,6 +162,8 @@ struct JsonReport<'a> {
     conflict_count: usize,
     critical_count: usize,
     warnings: &'a [String],
+    manager: Option<&'a str>,
+    manager_profile: Option<&'a str>,
     conflicts: Vec<JsonConflict<'a>>,
 }
 
@@ -178,6 +189,8 @@ pub fn json(report: &Report) -> anyhow::Result<String> {
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
         warnings: report.warnings,
+        manager: report.manager.map(|(name, _)| name),
+        manager_profile: report.manager.map(|(_, profile)| profile),
         conflicts: report
             .conflicts
             .iter()
@@ -274,6 +287,7 @@ mod tests {
             plugins_read: 0,
             mods_with_metadata: 3,
             warnings: &[],
+            manager: None,
             conflicts: &conflicts,
         };
 
@@ -304,6 +318,7 @@ mod tests {
             plugins_read: 0,
             mods_with_metadata: 3,
             warnings: &[],
+            manager: None,
             conflicts: &conflicts,
         };
 
@@ -326,6 +341,7 @@ mod tests {
             plugins_read: 0,
             mods_with_metadata: 3,
             warnings: &[],
+            manager: None,
             conflicts: &conflicts,
         };
 

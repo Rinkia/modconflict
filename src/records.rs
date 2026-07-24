@@ -14,6 +14,7 @@ use std::path::Path;
 
 use esplugin::{GameId, ParseOptions, Plugin};
 
+use crate::manager::ManagerData;
 use crate::model::{Conflict, Dep, DepKind, ModEntry, ModId, Symbol, SymbolKind};
 use crate::profile::RecordSpec;
 use crate::scan::RawMod;
@@ -90,7 +91,12 @@ struct Loaded {
 ///
 /// Plugins that fail to parse are collected and skipped: a single malformed
 /// `.esp` must not cost the user the rest of the report.
-pub fn scan(spec: &RecordSpec, raw: &[RawMod], mods: &[ModEntry]) -> RecordScan {
+pub fn scan(
+    spec: &RecordSpec,
+    raw: &[RawMod],
+    mods: &[ModEntry],
+    manager: Option<&ManagerData>,
+) -> RecordScan {
     let game = spec.game_id();
     let base: HashSet<String> = spec
         .base_ids
@@ -135,7 +141,7 @@ pub fn scan(spec: &RecordSpec, raw: &[RawMod], mods: &[ModEntry]) -> RecordScan 
     }
 
     resolve(&mut loaded);
-    result.overlaps = compare(&loaded);
+    result.overlaps = compare(&loaded, manager);
     result
 }
 
@@ -172,7 +178,7 @@ fn resolve(loaded: &mut [Loaded]) {
     }
 }
 
-fn compare(loaded: &[Loaded]) -> Vec<Conflict> {
+fn compare(loaded: &[Loaded], manager: Option<&ManagerData>) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
 
     // ponytail: O(n^2) pairwise. Fine up to a few hundred plugins, which is a
@@ -191,10 +197,18 @@ fn compare(loaded: &[Loaded]) -> Vec<Conflict> {
             let mut mods = vec![a.mod_id.clone(), b.mod_id.clone()];
             mods.sort();
 
+            let plugins = vec![a.filename.clone(), b.filename.clone()];
+            // Only a mod manager knows the plugin order, so without one the
+            // report says two plugins clash but not which survives.
+            let winner = manager
+                .and_then(|m| m.plugin_winner(&plugins))
+                .cloned();
+
             conflicts.push(Conflict::RecordOverlap {
-                plugins: vec![a.filename.clone(), b.filename.clone()],
+                plugins,
                 mods,
                 records,
+                winner,
             });
         }
     }
@@ -242,7 +256,7 @@ mod tests {
         let raw = scanner::scan_dir(dir, &metadata_names()).unwrap().mods;
         let mut mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(&profile, m)).collect();
         let spec = profile.records.clone().unwrap();
-        let scan = scan(&spec, &raw, &mods);
+        let scan = scan(&spec, &raw, &mods, None);
         scan.enrich(&mut mods);
         (scan, mods)
     }
@@ -264,6 +278,7 @@ mod tests {
                 plugins,
                 mods,
                 records,
+                ..
             } => {
                 assert_eq!(plugins.len(), 2);
                 assert_eq!(mods, &["ModA".to_string(), "ModB".to_string()]);

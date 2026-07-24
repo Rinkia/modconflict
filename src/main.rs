@@ -10,6 +10,7 @@ mod hostile;
 mod container;
 mod limits;
 mod loadorder;
+mod manager;
 mod model;
 mod parse;
 mod profile;
@@ -57,6 +58,11 @@ struct Cli {
     #[arg(long, value_name = "DIR")]
     profiles: Option<PathBuf>,
 
+    /// Which mod manager governs this folder. Detected automatically when
+    /// omitted; `none` ignores one that is there.
+    #[arg(short, long, value_enum)]
+    manager: Option<manager::Manager>,
+
     /// Skip the record-level pass. Parsing every plugin is the slow part of a
     /// large Bethesda load order.
     #[arg(long)]
@@ -96,6 +102,7 @@ fn run() -> Result<bool> {
             game: cli.game.as_deref(),
             load_order: cli.load_order.as_deref(),
             profiles_dir: cli.profiles.as_deref(),
+            manager: cli.manager,
             skip_records: cli.no_records,
         },
     )?;
@@ -347,6 +354,110 @@ mod tests {
             }
             other => panic!("expected a missing dependency, got {other:?}"),
         }
+    }
+
+    /// The payoff of reading a mod manager: the Creation Engine profile has no
+    /// load order of its own on purpose, so without MO2 the report can say two
+    /// mods clash but never which one survives. With it, both winners are named.
+    #[test]
+    fn mod_organizer_decides_both_kinds_of_winner() {
+        use crate::testutil::{write_folder_mod, write_plugin};
+
+        let root = tempfile::tempdir().unwrap();
+        let mods = root.path().join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+
+        // Two mods editing the same record and shipping the same texture.
+        for (name, plugin) in [("LoserMod", "Loser.esp"), ("WinnerMod", "Winner.esp")] {
+            write_folder_mod(&mods, name, &[("textures/iron.dds", name)]);
+            write_plugin(
+                &mods.join(name).join(plugin),
+                &["Skyrim.esm"],
+                &[0x0000_0ABC],
+            );
+        }
+
+        // MO2 writes highest priority first, so WinnerMod on top wins.
+        let profile = root.path().join("profiles").join("Default");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("modlist.txt"), "+WinnerMod
++LoserMod
+").unwrap();
+        std::fs::write(
+            profile.join("plugins.txt"),
+            "*Skyrim.esm
+*Loser.esp
+*Winner.esp
+",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("ModOrganizer.ini"),
+            "[General]
+selected_profile=Default
+",
+        )
+        .unwrap();
+
+        let analysis = analyze::run(&mods, &analyze::Options::default()).unwrap();
+
+        let manager = analysis.manager.as_ref().expect("MO2 should be detected");
+        assert_eq!(manager.profile, "Default");
+
+        let overlap = analysis
+            .conflicts
+            .iter()
+            .find(|c| matches!(c, Conflict::FileOverlap { .. }))
+            .expect("the shared texture must be reported");
+        match overlap {
+            Conflict::FileOverlap { path, winner, .. } => {
+                assert_eq!(path, "textures/iron.dds");
+                assert_eq!(winner.as_deref(), Some("WinnerMod"));
+            }
+            other => panic!("expected a file overlap, got {other:?}"),
+        }
+
+        let record = analysis
+            .conflicts
+            .iter()
+            .find(|c| matches!(c, Conflict::RecordOverlap { .. }))
+            .expect("the shared record must be reported");
+        match record {
+            Conflict::RecordOverlap { winner, records, .. } => {
+                assert_eq!(*records, 1);
+                assert_eq!(winner.as_deref(), Some("Winner.esp"));
+            }
+            other => panic!("expected a record overlap, got {other:?}"),
+        }
+    }
+
+    /// The same folder without the manager: the clashes are still found, but
+    /// nothing claims to know who wins.
+    #[test]
+    fn without_a_manager_no_winner_is_invented() {
+        use crate::testutil::{write_folder_mod, write_plugin};
+
+        let dir = tempfile::tempdir().unwrap();
+        for (name, plugin) in [("ModA", "A.esp"), ("ModB", "B.esp")] {
+            write_folder_mod(dir.path(), name, &[("textures/iron.dds", name)]);
+            write_plugin(
+                &dir.path().join(name).join(plugin),
+                &["Skyrim.esm"],
+                &[0x0000_0ABC],
+            );
+        }
+
+        let analysis = analyze::run(dir.path(), &analyze::Options::default()).unwrap();
+
+        assert!(analysis.manager.is_none());
+        assert!(analysis.conflicts.iter().any(|c| matches!(
+            c,
+            Conflict::FileOverlap { winner: None, .. }
+        )));
+        assert!(analysis.conflicts.iter().any(|c| matches!(
+            c,
+            Conflict::RecordOverlap { winner: None, .. }
+        )));
     }
 
     #[test]

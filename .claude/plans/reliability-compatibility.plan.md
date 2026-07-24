@@ -310,3 +310,39 @@ nuovi, più forte in una cosa: gira a ogni `cargo test`.
 contratto JSON (campo `warnings` nuovo) invece di lasciarlo passare.
 
 **Prossima**: Fase 8 (hashing) o 11 (mod manager). La 13 è per metà già fatta.
+
+
+---
+
+## 13. Fase 11 — fatta
+
+**L'intuizione che ha ridotto il lavoro**: la mappatura plugin↔mod non va letta
+da nessuna parte. La scansione sa già quale mod spedisce quale `.esp`
+(`records.provides`). Al manager mancavano solo i *due ordinamenti*, e sono file
+di testo.
+
+**MO2**: `modlist.txt` (priorità), `loadorder.txt`/`plugins.txt` (ordine
+plugin), `ModOrganizer.ini` (profilo attivo). Rilevamento automatico: `mods/` e
+`profiles/` stanno fianco a fianco.
+
+**Il dettaglio che decide tutto**: `modlist.txt` è scritto **priorità più alta
+per prima**. L'ordine di caricamento è il file rovesciato. Sbagliarlo avrebbe
+nominato vincitore il perdente di *ogni* sovrapposizione, con totale sicurezza.
+Un test lo blocca.
+
+**Risultato**: `[WARN] 2 mods ship textures/iron.dds (WeaponRebalance wins)` e
+`[WARN] ... both edit 2 records (WeaponRebalance.esp wins)`. Con `--manager
+none` gli stessi due conflitti restano, senza vincitore inventato.
+
+**Vortex: dichiarato non supportato.** Tiene lo stato in un LevelDB, non in file
+di testo; leggerlo significherebbe reverse-engineering di un formato interno non
+documentato che cambia tra le release. Dirlo è più utile che indovinare male.
+
+**Un panic vero nel codice nuovo**, trovato dal run dal vivo e non dai test:
+`split_at(1)` su una riga che inizia col BOM UTF-8 spacca su un confine di
+carattere — e PowerShell scrive il BOM di default, quindi è *lo* scenario
+Windows. Corretto con `strip_prefix` e strip del BOM, più due regression test
+(BOM e nomi mod non-ASCII). Nota: la Fase 10 aveva appena finito di blindare
+l'input ostile, e la stessa classe di bug è rientrata dalla finestra con il
+codice nuovo. I test sintetici non lo avevano preso perché li scrivevo in ASCII
+puro.

@@ -235,6 +235,7 @@ Options:
   -j, --json                Print the report as JSON
   -l, --load-order <FILE>   Load order file, overriding the profile's default
       --profiles <DIR>      Directory of extra game profiles (.toml)
+  -m, --manager <MANAGER>   Mod manager governing the folder [mo2, none]
       --no-records          Skip the record-level pass (the slow part)
       --list-games          List the games this build knows about
 ```
@@ -287,6 +288,54 @@ and uses it for two things:
 `--load-order <FILE>` points at a specific file when it lives somewhere
 unusual.
 
+## Mod managers
+
+The Creation Engine profile ships without a load order **on purpose**:
+`plugins.txt` lists *plugin* names while a mod id here is the mod folder name,
+and guessing the mapping would name the wrong winner with total confidence.
+
+A mod manager knows both. Point ModConflict at a Mod Organizer 2 instance's
+`mods/` folder and it reads what MO2 wrote:
+
+```
+$ modconflict "D:\MO2\Skyrim\mods"
+Skyrim / Fallout / Starfield: scanned 2 mods
+read 2 plugins at record level
+load order from Mod Organizer 2, profile "Default"
+2 conflicts (0 critical)
+
+[WARN] 2 mods ship textures/iron.dds (WeaponRebalance wins)
+[WARN] BetterWeapons.esp and WeaponRebalance.esp both edit 2 records (WeaponRebalance.esp wins)
+```
+
+Without it, the same two clashes are found but no winner is invented:
+
+```
+$ modconflict "D:\MO2\Skyrim\mods" --manager none
+[WARN] 2 mods ship textures/iron.dds
+[WARN] BetterWeapons.esp and WeaponRebalance.esp both edit 2 records
+```
+
+The plugin-to-mod mapping is never read from anywhere: the scan already knows
+which mod ships which `.esp`. Only the two orderings were missing — which mod
+overwrites which (`modlist.txt`) and which plugin loads after which
+(`loadorder.txt`, else `plugins.txt`) — and both are plain text.
+
+`ModOrganizer.ini` names the active profile; failing that, the only profile
+present is used.
+
+**Detection** is automatic: an MO2 instance keeps `mods/` and `profiles/` side
+by side. `--manager mo2` demands one and errors if it is absent; `--manager
+none` ignores one that is there. An explicit `--load-order` still wins over
+both.
+
+Read-only, always. The manager's own files are never written.
+
+**Vortex is not supported.** It keeps its state in a LevelDB rather than text
+files, and reading it would mean reverse-engineering an undocumented internal
+format that changes between releases. Saying so is more useful than guessing
+wrong about which mod wins.
+
 ## What it detects
 
 | Check | Severity | Meaning |
@@ -331,6 +380,7 @@ parse.rs      Profile + RawMod -> ModEntry     (data-driven, no per-game code)
 model.rs      ModEntry, Conflict, Severity     (the shared vocabulary)
 conflict.rs   detection: pure function, no I/O (the only logic that matters)
 loadorder.rs  who is enabled, and who wins an overlap
+manager.rs    Mod Organizer 2: mod priority and plugin order, read-only
 report.rs     text and JSON output
 tui.rs        ratatui front end; all state in App, testable without a terminal
 main.rs       CLI wiring
@@ -506,10 +556,9 @@ stronger at one thing — it runs on every `cargo test`.
   load order costs time and memory. `--no-records` turns it off.
 - Plugins are read from disk, so a mod still packed as a `.zip` is not analysed
   at the record level. Creation Engine mods are installed as folders.
-- The Creation Engine profile deliberately has no load order. `plugins.txt`
-  lists plugin names while a mod id here is the mod folder name; mapping one to
-  the other is the mod manager's job, and guessing would name the wrong winner
-  with total confidence.
+- The Creation Engine profile has no load order of its own; it needs a mod
+  manager to supply one. Mod Organizer 2 is supported, Vortex is not — see
+  above for why.
 - Archives nested inside a `.zip` are not expanded — only archives sitting in a
   mod folder are.
 - Version comparison is semver. Requirements in another dialect — Forge's

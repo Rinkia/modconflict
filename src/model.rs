@@ -117,6 +117,8 @@ pub enum Conflict {
         plugins: Vec<String>,
         mods: Vec<ModId>,
         records: usize,
+        /// The plugin that loads later, when a mod manager told us the order.
+        winner: Option<String>,
     },
 }
 
@@ -153,12 +155,21 @@ impl Conflict {
                 format!("{mod_id} is incompatible with {other}")
             }
             Conflict::RecordOverlap {
-                plugins, records, ..
-            } => format!(
-                "{} and {} both edit {records} records",
-                plugins.first().map(String::as_str).unwrap_or("?"),
-                plugins.get(1).map(String::as_str).unwrap_or("?")
-            ),
+                plugins,
+                records,
+                winner,
+                ..
+            } => {
+                let pair = format!(
+                    "{} and {} both edit {records} records",
+                    plugins.first().map(String::as_str).unwrap_or("?"),
+                    plugins.get(1).map(String::as_str).unwrap_or("?")
+                );
+                match winner {
+                    Some(w) => format!("{pair} ({w} wins)"),
+                    None => pair,
+                }
+            }
         }
     }
 
@@ -212,13 +223,24 @@ impl Conflict {
                 plugins,
                 mods,
                 records,
+                winner,
             } => format!(
-                "These two plugins edit {records} of the same records:\n{}\n\nFrom:\n{}\n\n\
-                 Whichever plugin loads later overwrites the other for every shared record. If \
-                 neither is a patch written for the other, load order alone decides which mod's \
-                 changes you actually get, and a compatibility patch may be needed.",
+                "These two plugins edit {records} of the same records:
+{}
+
+From:
+{}
+
+{}",
                 bullets(plugins),
-                bullets(mods)
+                bullets(mods),
+                match winner {
+                    Some(w) => format!(
+                        "\"{w}\" loads later, so its version of every shared record is the one                          the game uses. If it is not a patch written for the other, the other                          mod's changes to those records are simply gone."
+                    ),
+                    None => "Whichever plugin loads later overwrites the other for every shared                              record, and no load order was available, so which one is unknown.                              If neither is a patch written for the other, a compatibility patch                              may be needed."
+                        .to_string(),
+                }
             ),
         }
     }

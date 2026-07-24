@@ -11,6 +11,7 @@ use anyhow::Result;
 
 use crate::conflict::{self, DetectOptions};
 use crate::loadorder;
+use crate::manager::{self, Manager, ManagerData};
 use crate::model::Conflict;
 use crate::parse;
 use crate::profile::{self, Profile};
@@ -23,6 +24,8 @@ pub struct Options<'a> {
     pub game: Option<&'a str>,
     pub load_order: Option<&'a Path>,
     pub profiles_dir: Option<&'a Path>,
+    /// Force a mod manager, or `None` to detect one.
+    pub manager: Option<Manager>,
     /// Off to skip the record-level pass, which is the slow part.
     pub skip_records: bool,
 }
@@ -43,6 +46,8 @@ pub struct Analysis {
     /// they reach the JSON report.
     pub warnings: Vec<String>,
     pub load_order_known: bool,
+    /// The mod manager whose files supplied the ordering, if any.
+    pub manager: Option<ManagerData>,
     pub conflicts: Vec<Conflict>,
 }
 
@@ -57,13 +62,22 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
     }
     .clone();
 
-    let load_order = loadorder::read(&profile, path, opts.load_order)?;
+    let found_manager = manager::read(path, opts.manager)?;
+
+    // Precedence: an explicit file, then the manager, then whatever the game
+    // profile knows how to find. The manager is the only source that covers
+    // games whose profile deliberately has no load order of its own.
+    let load_order = match (opts.load_order, &found_manager) {
+        (Some(_), _) => loadorder::read(&profile, path, opts.load_order)?,
+        (None, Some(data)) => data.mod_order.clone(),
+        (None, None) => loadorder::read(&profile, path, None)?,
+    };
     let mut all_mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(&profile, m)).collect();
 
     // The record pass runs before mods are filtered, because it lines the raw
     // mods up against the parsed ones one to one.
     let records = match (&profile.records, opts.skip_records) {
-        (Some(spec), false) => records::scan(spec, raw, &all_mods),
+        (Some(spec), false) => records::scan(spec, raw, &all_mods, found_manager.as_ref()),
         _ => records::RecordScan::default(),
     };
     records.enrich(&mut all_mods);
@@ -104,6 +118,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
         unreadable_plugins: records.unreadable.clone(),
         warnings: scan.warnings,
         load_order_known: !load_order.is_empty(),
+        manager: found_manager,
         conflicts,
     })
 }
@@ -119,6 +134,10 @@ impl Analysis {
             plugins_read: self.plugins_read,
             mods_with_metadata: self.mods_with_metadata,
             warnings: &self.warnings,
+            manager: self
+                .manager
+                .as_ref()
+                .map(|m| (m.name, m.profile.as_str())),
             conflicts: &self.conflicts,
         }
     }

@@ -10,6 +10,8 @@
   "conflict_count": 2,
   "critical_count": 2,
   "warnings": [],
+  "manager": null,
+  "manager_profile": null,
   "conflicts": [
     {
       "severity": "critical",
