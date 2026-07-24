@@ -359,6 +359,7 @@ mod tests {
     /// The payoff of reading a mod manager: the Creation Engine profile has no
     /// load order of its own on purpose, so without MO2 the report can say two
     /// mods clash but never which one survives. With it, both winners are named.
+    #[cfg(feature = "records")]
     #[test]
     fn mod_organizer_decides_both_kinds_of_winner() {
         use crate::testutil::{write_folder_mod, write_plugin};
@@ -433,6 +434,7 @@ selected_profile=Default
 
     /// The same folder without the manager: the clashes are still found, but
     /// nothing claims to know who wins.
+    #[cfg(feature = "records")]
     #[test]
     fn without_a_manager_no_winner_is_invented() {
         use crate::testutil::{write_folder_mod, write_plugin};

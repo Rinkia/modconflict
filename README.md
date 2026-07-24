@@ -391,6 +391,9 @@ main.rs       CLI wiring
 ```bash
 cargo test
 cargo clippy --all-targets
+
+# The permissive-only build must keep compiling too.
+cargo build --no-default-features
 ```
 
 Tests build throwaway zip archives in a temp directory, so the suite runs
@@ -468,6 +471,11 @@ unnoticed. After a deliberate change:
 ```bash
 UPDATE_SNAPSHOTS=1 cargo test snapshot
 ```
+
+### Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the one invariant (this
+tool reads, it never writes), and what a new game profile needs.
 
 ### Every profile must prove itself
 
@@ -567,6 +575,21 @@ stronger at one thing — it runs on every `cargo test`.
 - Factorio prototype-name collisions live inside `data.lua` and would need a
   Lua parser. Only mod-id level checks today.
 
-## License
+## Licence
 
-MIT
+ModConflict's own source is **MIT** — see [LICENSE](LICENSE).
+
+A *binary* is a different question, because it contains its dependencies.
+Record-level detection is built on [`esplugin`](https://crates.io/crates/esplugin),
+the plugin parser behind LOOT, which is **GPL-3.0**. A binary linking it must be
+distributed under GPL-3.0.
+
+| What | Licence |
+|------|---------|
+| This repository's source | MIT |
+| A binary built with default features | GPL-3.0, because it contains `esplugin` |
+| `cargo build --no-default-features` | permissive throughout — no record comparison |
+
+That is what the `records` feature is for. Every other dependency is
+permissive. [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) has the full
+picture.

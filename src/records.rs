@@ -10,8 +10,10 @@
 //! reported next to every other kind instead of in a separate world.
 
 use std::collections::{HashMap, HashSet};
+#[cfg(feature = "records")]
 use std::path::Path;
 
+#[cfg(feature = "records")]
 use esplugin::{GameId, ParseOptions, Plugin};
 
 use crate::manager::ManagerData;
@@ -81,6 +83,20 @@ impl RecordScan {
     }
 }
 
+/// Without the `records` feature there is no plugin parser, so the pass finds
+/// nothing and everything downstream carries on unchanged. See
+/// THIRD-PARTY-NOTICES.md for why the feature exists.
+#[cfg(not(feature = "records"))]
+pub fn scan(
+    _spec: &RecordSpec,
+    _raw: &[RawMod],
+    _mods: &[ModEntry],
+    _manager: Option<&ManagerData>,
+) -> RecordScan {
+    RecordScan::default()
+}
+
+#[cfg(feature = "records")]
 struct Loaded {
     mod_id: ModId,
     filename: String,
@@ -91,6 +107,7 @@ struct Loaded {
 ///
 /// Plugins that fail to parse are collected and skipped: a single malformed
 /// `.esp` must not cost the user the rest of the report.
+#[cfg(feature = "records")]
 pub fn scan(
     spec: &RecordSpec,
     raw: &[RawMod],
@@ -148,6 +165,7 @@ pub fn scan(
 /// Behind a panic boundary for the same reason the container readers are: a
 /// plugin is hostile binary input, and one malformed file must not cost the
 /// other two hundred.
+#[cfg(feature = "records")]
 fn load(game: GameId, path: &Path) -> anyhow::Result<Plugin> {
     let owned = path.to_path_buf();
     let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -168,6 +186,7 @@ fn load(game: GameId, path: &Path) -> anyhow::Result<Plugin> {
 /// FormIDs are stored relative to each plugin's own master list, so they mean
 /// nothing across plugins until they are resolved against it. Skipping this
 /// step would compare two different numbering schemes and call it an overlap.
+#[cfg(feature = "records")]
 fn resolve(loaded: &mut [Loaded]) {
     let refs: Vec<&Plugin> = loaded.iter().map(|l| &l.plugin).collect();
     let Ok(metadata) = esplugin::plugins_metadata(&refs) else {
@@ -178,6 +197,7 @@ fn resolve(loaded: &mut [Loaded]) {
     }
 }
 
+#[cfg(feature = "records")]
 fn compare(loaded: &[Loaded], manager: Option<&ManagerData>) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
 
@@ -215,6 +235,7 @@ fn compare(loaded: &[Loaded], manager: Option<&ManagerData>) -> Vec<Conflict> {
     conflicts
 }
 
+#[cfg(feature = "records")]
 fn plugin_files<'a>(spec: &'a RecordSpec, files: &'a [String]) -> impl Iterator<Item = &'a str> {
     files.iter().filter_map(move |f| {
         let (_, ext) = f.rsplit_once('.')?;
@@ -225,13 +246,14 @@ fn plugin_files<'a>(spec: &'a RecordSpec, files: &'a [String]) -> impl Iterator<
     })
 }
 
+#[cfg(feature = "records")]
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "records"))]
 mod tests {
     use super::*;
     use crate::profile::{by_name, load_all, Profile};

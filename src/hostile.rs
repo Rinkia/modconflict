@@ -144,7 +144,8 @@ fn a_folder_of_hostile_archives_still_produces_a_report() {
     assert!(!analysis.warnings.is_empty(), "the failures must be reported");
 }
 
-#[test]
+#[cfg(feature = "records")]
+    #[test]
 fn a_malformed_plugin_never_takes_down_the_record_pass() {
     let dir = tempfile::tempdir().unwrap();
     let broken = dir.path().join("BrokenMod");

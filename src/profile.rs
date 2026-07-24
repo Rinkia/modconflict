@@ -129,6 +129,7 @@ pub enum RecordGame {
     Starfield,
 }
 
+#[cfg(feature = "records")]
 impl RecordSpec {
     pub fn game_id(&self) -> esplugin::GameId {
         match self.game {

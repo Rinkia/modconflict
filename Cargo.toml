@@ -6,6 +6,16 @@ description = "Scan a game mod folder and report conflicts before the game crash
 license = "MIT"
 repository = "https://github.com/Rinkia/modconflict"
 
+[features]
+# Record-level conflict detection for Creation Engine games.
+#
+# On by default because it is a headline feature — but it pulls in `esplugin`,
+# which is GPL-3.0, and a binary linking it must be distributed under GPL-3.0.
+# Build with `--no-default-features` for a binary that is MIT throughout.
+# See THIRD-PARTY-NOTICES.md.
+default = ["records"]
+records = ["dep:esplugin"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -21,7 +31,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 ba2 = "3.0.1"
 vpk = "0.3.0"
 unpak = "1.0.5"
-esplugin = "6.1.4"
+esplugin = { version = "6.1.4", optional = true }
 larian-formats = "0.8.1"
 
 [dev-dependencies]
