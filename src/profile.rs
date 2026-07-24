@@ -74,6 +74,52 @@ pub struct Profile {
     pub dependency_sources: Vec<DependencySource>,
     #[serde(default)]
     pub load_order: Option<LoadOrderSpec>,
+    /// Present for games whose mods carry binary plugin records.
+    #[serde(default)]
+    pub records: Option<RecordSpec>,
+}
+
+/// Record-level analysis, for Creation Engine games.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordSpec {
+    pub game: RecordGame,
+    /// Plugin file extensions to parse.
+    pub extensions: Vec<String>,
+    /// Masters the game itself supplies. These are never reported missing —
+    /// they live in the game folder, not in anyone's mod folder.
+    #[serde(default)]
+    pub base_ids: Vec<String>,
+}
+
+/// Named separately from esplugin's `GameId` so an unknown value fails when the
+/// profile loads, with the file named, rather than silently picking a default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordGame {
+    Morrowind,
+    Oblivion,
+    Skyrim,
+    SkyrimSE,
+    Fallout3,
+    FalloutNV,
+    Fallout4,
+    Starfield,
+}
+
+impl RecordSpec {
+    pub fn game_id(&self) -> esplugin::GameId {
+        match self.game {
+            RecordGame::Morrowind => esplugin::GameId::Morrowind,
+            RecordGame::Oblivion => esplugin::GameId::Oblivion,
+            RecordGame::Skyrim => esplugin::GameId::Skyrim,
+            RecordGame::SkyrimSE => esplugin::GameId::SkyrimSE,
+            RecordGame::Fallout3 => esplugin::GameId::Fallout3,
+            RecordGame::FalloutNV => esplugin::GameId::FalloutNV,
+            RecordGame::Fallout4 => esplugin::GameId::Fallout4,
+            RecordGame::Starfield => esplugin::GameId::Starfield,
+        }
+    }
 }
 
 fn yes() -> bool {

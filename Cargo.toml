@@ -21,6 +21,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 ba2 = "3.0.1"
 vpk = "0.3.0"
 unpak = "1.0.5"
+esplugin = "6.1.4"
 
 [dev-dependencies]
 tempfile = "3"

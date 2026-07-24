@@ -134,6 +134,48 @@ Archives are identified by magic bytes, not by extension, because renamed
 extensions are common. Adding a format is one entry in a table: a sniff
 function and a read function.
 
+## The record level
+
+For Creation Engine games the file list is still not the real story. The
+conflict Skyrim and Fallout players actually hit is two plugins editing the
+**same record** — the same NPC, the same weapon, the same cell. Nothing in the
+filenames reveals it.
+
+```
+$ modconflict "D:\MO2\Skyrim\mods"
+Skyrim / Fallout / Starfield: scanned 4 mods
+read 4 plugins at record level
+2 conflicts (1 critical)
+
+[CRIT] PatchMod needs missing MissingBigMod.esp
+[WARN] BetterWeapons.esp and WeaponRebalance.esp both edit 2 records
+```
+
+[`esplugin`](https://crates.io/crates/esplugin) — the library behind LOOT —
+does the parsing. What ModConflict adds is the translation into the shared
+model, so record findings land next to every other kind of conflict:
+
+- **Record overlap** is a *warning*, not an error. Overlapping is how
+  compatibility patches work. The report says how many records two plugins
+  share, and that the later one wins them all.
+- **Masters become dependencies.** A plugin's masters are checked like any
+  other dependency, so a patch whose base mod is not installed is a missing
+  dependency with a clear message.
+- **The game's own masters are not dependencies.** `Skyrim.esm` lives in the
+  game folder, never in a mod folder, so requiring it is not a problem. The
+  `base_ids` list in the profile says which masters those are — extend it in a
+  user profile for whichever game you are scanning.
+- **Plugin filenames become symbols.** Two mods installing the same `.esp`
+  filename is a genuine clash: only one file survives on disk.
+
+FormIDs are stored relative to each plugin's own master list, so they mean
+nothing across plugins until resolved against it — ModConflict resolves before
+comparing, because skipping that step compares two different numbering schemes
+and calls the result an overlap.
+
+Parsing every plugin is the slow part of a large load order. `--no-records`
+skips it.
+
 ## Install
 
 ```bash
@@ -162,6 +204,7 @@ Options:
   -j, --json                Print the report as JSON
   -l, --load-order <FILE>   Load order file, overriding the profile's default
       --profiles <DIR>      Directory of extra game profiles (.toml)
+      --no-records          Skip the record-level pass (the slow part)
       --list-games          List the games this build knows about
 ```
 
@@ -222,6 +265,7 @@ unusual.
 | Duplicate id | critical | Two mods claim the same identifier |
 | Declared incompatibility | critical | A mod says it cannot run alongside another installed mod |
 | File overlap | warning | Two mods ship the same internal path — the loser is silently ignored |
+| Record overlap | warning | Two plugins edit the same records — the later one wins them all |
 
 File overlap is only a warning on purpose: compatibility patches overlap
 deliberately, and a checker that cries wolf gets ignored.
@@ -234,7 +278,7 @@ deliberately, and a checker that cries wolf gets ignored.
 | `minecraft-fabric` | `fabric.mod.json` | `depends` / `recommends` / `breaks` / `conflicts`, `provides` |
 | `minecraft-forge` | `META-INF/mods.toml` | Forge and NeoForge dependency tables |
 | `farming-simulator` | `modDesc.xml` | Mod id comes from the zip filename |
-| `creation-engine` | none — `.esp`/`.bsa` | Skyrim, Fallout, Starfield; archive contents expanded |
+| `creation-engine` | none — `.esp`/`.bsa` | Skyrim, Fallout, Starfield; archives expanded, records compared |
 
 `--list-games` prints what your build knows, including your own profiles.
 
@@ -243,6 +287,7 @@ deliberately, and a checker that cries wolf gets ignored.
 ```
 scan.rs       walk the folder, open archives, inventory files + metadata bytes
 container.rs  binary archives (.bsa/.ba2/.vpk/.pak) -> the paths inside them
+records.rs    Creation Engine plugins -> record overlaps, masters, plugin names
 value.rs      JSON/TOML/XML collapsed into one document tree with dotted paths
 profile.rs    the game profile schema, the built-ins, and autodetection
 parse.rs      Profile + RawMod -> ModEntry     (data-driven, no per-game code)
@@ -266,9 +311,10 @@ anywhere, offline, with no game installed.
 
 ## Known limits
 
-- Binary archives contribute their *file list*, not their records. Skyrim's
-  FormID-level conflicts — two plugins editing the same record — need the
-  plugin format itself parsed, which is the next step (`esplugin` does it).
+- Record comparison is pairwise and parses every plugin whole, so a very large
+  load order costs time and memory. `--no-records` turns it off.
+- Plugins are read from disk, so a mod still packed as a `.zip` is not analysed
+  at the record level. Creation Engine mods are installed as folders.
 - The Creation Engine profile deliberately has no load order. `plugins.txt`
   lists plugin names while a mod id here is the mod folder name; mapping one to
   the other is the mod manager's job, and guessing would name the wrong winner

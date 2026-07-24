@@ -13,6 +13,8 @@ pub struct Report<'a> {
     pub load_order_known: bool,
     /// Binary archives whose contents were expanded into the scan, by format.
     pub containers: Vec<String>,
+    /// Binary plugins parsed at the record level.
+    pub plugins_read: usize,
     pub conflicts: &'a [Conflict],
 }
 
@@ -53,6 +55,10 @@ pub fn print_text(report: &Report) {
         );
     }
 
+    if report.plugins_read > 0 {
+        println!("read {} plugins at record level", report.plugins_read);
+    }
+
     if !report.load_order_known && report.profile.load_order.is_some() {
         println!("note: no load order file found — overlap winners are unknown");
     }
@@ -83,6 +89,7 @@ struct JsonReport<'a> {
     mods_disabled: usize,
     load_order_known: bool,
     containers_read: usize,
+    plugins_read: usize,
     conflict_count: usize,
     critical_count: usize,
     conflicts: Vec<JsonConflict<'a>>,
@@ -105,6 +112,7 @@ pub fn print_json(report: &Report) -> anyhow::Result<()> {
         mods_disabled: report.mods_disabled,
         load_order_known: report.load_order_known,
         containers_read: report.containers.len(),
+        plugins_read: report.plugins_read,
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
         conflicts: report
@@ -201,6 +209,7 @@ mod tests {
             mods_disabled: 0,
             load_order_known: true,
             containers: Vec::new(),
+            plugins_read: 0,
             conflicts: &conflicts,
         };
 
@@ -228,6 +237,7 @@ mod tests {
             mods_disabled: 0,
             load_order_known: true,
             containers: Vec::new(),
+            plugins_read: 0,
             conflicts: &conflicts,
         };
 
@@ -247,6 +257,7 @@ mod tests {
             mods_disabled: 1,
             load_order_known: true,
             containers: Vec::new(),
+            plugins_read: 0,
             conflicts: &conflicts,
         };
 

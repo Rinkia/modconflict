@@ -4,6 +4,7 @@ mod loadorder;
 mod model;
 mod parse;
 mod profile;
+mod records;
 mod report;
 mod scan;
 #[cfg(test)]
@@ -47,6 +48,11 @@ struct Cli {
     #[arg(long, value_name = "DIR")]
     profiles: Option<PathBuf>,
 
+    /// Skip the record-level pass. Parsing every plugin is the slow part of a
+    /// large Bethesda load order.
+    #[arg(long)]
+    no_records: bool,
+
     /// List the games this build knows about, and exit.
     #[arg(long)]
     list_games: bool,
@@ -83,7 +89,18 @@ fn run() -> Result<bool> {
     };
 
     let load_order = loadorder::read(profile, &cli.path, cli.load_order.as_deref())?;
-    let all_mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(profile, m)).collect();
+    let mut all_mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(profile, m)).collect();
+
+    // The record pass runs before mods are filtered, because it needs the raw
+    // mods and the parsed ones lined up one to one.
+    let records = match (&profile.records, cli.no_records) {
+        (Some(spec), false) => records::scan(spec, &raw, &all_mods),
+        _ => records::RecordScan::default(),
+    };
+    records.enrich(&mut all_mods);
+    for problem in &records.unreadable {
+        eprintln!("warning: cannot read plugin {problem}");
+    }
 
     let ids: Vec<_> = all_mods.iter().map(|m| m.id.clone()).collect();
     let mods_disabled = report::disabled_count(&load_order, &ids);
@@ -97,7 +114,15 @@ fn run() -> Result<bool> {
         check_file_overlap: profile.check_file_overlap,
         load_order: load_order.clone(),
     };
-    let conflicts = conflict::detect(&mods, &options);
+    let mut conflicts = conflict::detect(&mods, &options);
+
+    let enabled: std::collections::HashSet<&str> = mods.iter().map(|m| m.id.as_str()).collect();
+    conflicts.extend(records.overlaps(&enabled));
+    conflicts.sort_by(|a, b| {
+        b.severity()
+            .cmp(&a.severity())
+            .then_with(|| a.title().cmp(&b.title()))
+    });
 
     let report = Report {
         profile,
@@ -108,6 +133,7 @@ fn run() -> Result<bool> {
             .iter()
             .flat_map(|m| m.containers.iter().map(|c| c.to_string()))
             .collect(),
+        plugins_read: records.plugin_count(),
         conflicts: &conflicts,
     };
 

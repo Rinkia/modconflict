@@ -31,12 +31,16 @@ pub struct Symbol {
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
     ModId,
+    /// A plugin file a mod installs, e.g. `MyMod.esp`. Two mods installing the
+    /// same plugin filename is a genuine clash: only one file survives on disk.
+    PluginFile,
 }
 
 impl std::fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SymbolKind::ModId => f.write_str("mod id"),
+            SymbolKind::PluginFile => f.write_str("plugin"),
         }
     }
 }
@@ -102,6 +106,14 @@ pub enum Conflict {
     },
     /// A mod declares another installed mod as incompatible.
     Incompatible { mod_id: ModId, other: ModId },
+    /// Two plugins edit the same records. Normal and often deliberate — it is
+    /// how compatibility patches work — but the later plugin's version of every
+    /// shared record is the one that survives.
+    RecordOverlap {
+        plugins: Vec<String>,
+        mods: Vec<ModId>,
+        records: usize,
+    },
 }
 
 impl Conflict {
@@ -109,7 +121,7 @@ impl Conflict {
         match self {
             // File overlap is often deliberate (compatibility patches), so it
             // never blocks — it only warns.
-            Conflict::FileOverlap { .. } => Severity::Warning,
+            Conflict::FileOverlap { .. } | Conflict::RecordOverlap { .. } => Severity::Warning,
             Conflict::DuplicateId { .. }
             | Conflict::MissingDep { .. }
             | Conflict::VersionMismatch { .. }
@@ -136,6 +148,13 @@ impl Conflict {
             Conflict::Incompatible { mod_id, other } => {
                 format!("{mod_id} is incompatible with {other}")
             }
+            Conflict::RecordOverlap {
+                plugins, records, ..
+            } => format!(
+                "{} and {} both edit {records} records",
+                plugins.first().map(String::as_str).unwrap_or("?"),
+                plugins.get(1).map(String::as_str).unwrap_or("?")
+            ),
         }
     }
 
@@ -185,15 +204,27 @@ impl Conflict {
                 "{mod_id} declares \"{other}\" as incompatible, and {other} is installed.\n\n\
                  Remove one of the two."
             ),
+            Conflict::RecordOverlap {
+                plugins,
+                mods,
+                records,
+            } => format!(
+                "These two plugins edit {records} of the same records:\n{}\n\nFrom:\n{}\n\n\
+                 Whichever plugin loads later overwrites the other for every shared record. If \
+                 neither is a patch written for the other, load order alone decides which mod's \
+                 changes you actually get, and a compatibility patch may be needed.",
+                bullets(plugins),
+                bullets(mods)
+            ),
         }
     }
 
     /// Mods involved — used by the TUI filter.
     pub fn mods(&self) -> Vec<&str> {
         match self {
-            Conflict::FileOverlap { mods, .. } | Conflict::DuplicateId { mods, .. } => {
-                mods.iter().map(String::as_str).collect()
-            }
+            Conflict::FileOverlap { mods, .. }
+            | Conflict::DuplicateId { mods, .. }
+            | Conflict::RecordOverlap { mods, .. } => mods.iter().map(String::as_str).collect(),
             Conflict::MissingDep { mod_id, dep } | Conflict::VersionMismatch { mod_id, dep, .. } => {
                 vec![mod_id.as_str(), dep.name.as_str()]
             }

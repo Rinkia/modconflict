@@ -58,6 +58,71 @@ pub fn write_bsa(path: &Path, entries: &[&str]) {
     archive.write(&mut out).unwrap();
 }
 
+/// Write a minimal but genuine Creation Engine plugin: a `TES4` header record
+/// declaring `masters`, then one group holding one record per entry in
+/// `form_ids`.
+///
+/// Hand-built bytes, but not unverified: `esplugin` is the authority that reads
+/// them back, and it rejects anything malformed — a test that gets the layout
+/// wrong fails rather than quietly passing.
+pub fn write_plugin(path: &Path, masters: &[&str], form_ids: &[u32]) {
+    const RECORD_HEADER_LEN: u32 = 24;
+
+    let mut header_data = Vec::new();
+    // HEDR: version, record count, next object id.
+    header_data.extend(subrecord(b"HEDR", &{
+        let mut d = Vec::new();
+        d.extend(1.7f32.to_le_bytes());
+        d.extend((form_ids.len() as i32).to_le_bytes());
+        d.extend(0x800u32.to_le_bytes());
+        d
+    }));
+    for master in masters {
+        let mut name = master.as_bytes().to_vec();
+        name.push(0); // zstring
+        header_data.extend(subrecord(b"MAST", &name));
+        header_data.extend(subrecord(b"DATA", &0u64.to_le_bytes()));
+    }
+
+    let mut out = Vec::new();
+    out.extend(record_header(b"TES4", header_data.len() as u32, 0));
+    out.extend(&header_data);
+
+    if !form_ids.is_empty() {
+        let mut records = Vec::new();
+        for id in form_ids {
+            // A record with no subrecords: the FormID in its header is all the
+            // overlap check needs.
+            records.extend(record_header(b"WEAP", 0, *id));
+        }
+        out.extend(b"GRUP");
+        out.extend((RECORD_HEADER_LEN + records.len() as u32).to_le_bytes());
+        out.extend([0u8; 16]); // label, group type, timestamp, version
+        out.extend(&records);
+    }
+
+    std::fs::write(path, out).unwrap();
+}
+
+fn record_header(kind: &[u8; 4], data_len: u32, form_id: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24);
+    out.extend(kind);
+    out.extend(data_len.to_le_bytes());
+    out.extend(0u32.to_le_bytes()); // flags
+    out.extend(form_id.to_le_bytes());
+    out.extend(0u32.to_le_bytes()); // version control
+    out.extend(0u32.to_le_bytes()); // form version + unknown
+    out
+}
+
+fn subrecord(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(6 + data.len());
+    out.extend(kind);
+    out.extend((data.len() as u16).to_le_bytes());
+    out.extend(data);
+    out
+}
+
 /// A minimal valid Factorio `info.json`.
 pub fn info_json(name: &str, version: &str, deps: &[&str]) -> String {
     let deps = deps

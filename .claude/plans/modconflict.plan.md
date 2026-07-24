@@ -181,7 +181,7 @@ src/
 - [x] Fase 4 — TUI ratatui
 - [x] Fase 5 — `--json`, load order, **profili di gioco dichiarativi**
 - [x] Fase 6 — **layer container binari** (`.bsa`/`.ba2`/`.vpk`/`.pak`)
-- [ ] Livello record: FormID Skyrim via `esplugin`
+- [x] Fase 7 — **livello record** via `esplugin`
 
 ## 9. Fase 5 — la generalizzazione
 
@@ -257,3 +257,38 @@ vincitore sbagliato con totale sicurezza.
 **Resta fuori**: il livello *record*. Gli archivi contribuiscono la lista file,
 non i FormID. Due plugin che editano lo stesso record è il conflitto classico di
 Skyrim e richiede il parsing del formato plugin — `esplugin`, prossimo passo.
+
+
+## 11. Fase 7 — il livello record
+
+Gli archivi binari danno la lista file. Ma per i giochi Bethesda il conflitto
+vero è un altro: **due plugin che editano lo stesso record** — lo stesso NPC, la
+stessa arma, la stessa cella. Nei nomi dei file non c'è traccia.
+
+`esplugin` (la libreria dietro LOOT) fa il parsing. Il nostro contributo è la
+traduzione nel modello condiviso, così i risultati record finiscono accanto a
+tutti gli altri conflitti invece che in un mondo separato:
+
+- **Record overlap = warning**, non errore. Sovrapporsi è *come funzionano* le
+  patch di compatibilità. Il report dice quanti record condividono e che il
+  plugin caricato dopo se li prende tutti.
+- **I master diventano dipendenze**, controllate come qualsiasi altra: una patch
+  senza il mod base installato è un `MissingDep` con messaggio chiaro.
+- **I master del gioco non sono dipendenze.** `Skyrim.esm` sta nella cartella
+  del gioco, mai in quella di un mod. La lista `base_ids` nel profilo dice
+  quali sono — estendibile in un profilo utente.
+- **I nomi dei plugin diventano symbol**: due mod che installano lo stesso
+  `.esp` è un conflitto reale, sopravvive un file solo.
+
+**Dettaglio che non si può saltare**: i FormID sono relativi alla master list
+di *ogni* plugin. Confrontarli senza `resolve_record_ids` significa paragonare
+due sistemi di numerazione diversi e chiamare overlap il risultato.
+
+**Test**: i plugin di prova sono byte costruiti a mano (header TES4, subrecord
+HEDR/MAST/DATA, un GRUP di record). Non è fede cieca: `esplugin` è l'autorità
+che li rilegge e rifiuta qualsiasi cosa malformata — se il layout fosse
+sbagliato il test fallirebbe invece di passare in silenzio.
+
+**Costi dichiarati**: parsing whole-plugin (tutti i record id in memoria) e
+confronto O(n²) a coppie. Entrambi marcati con commento `ponytail:` e
+disattivabili con `--no-records`.

@@ -16,3 +16,31 @@ name = "creation-engine"
 display_name = "Skyrim / Fallout / Starfield"
 detect_extensions = ["esp", "esm", "esl", "bsa", "ba2"]
 check_file_overlap = true
+
+# Record level: two plugins editing the same record is the conflict Bethesda
+# players actually hit, and nothing in the filenames reveals it.
+#
+# `game` picks the record layout. Skyrim SE reads Skyrim LE and Fallout plugins
+# closely enough for conflict detection; set it explicitly in a user profile
+# when scanning a different game's folder.
+[records]
+game = "skyrimse"
+extensions = ["esp", "esm", "esl"]
+
+# Masters the game ships itself. They live in the game folder, never in a mod
+# folder, so requiring one is not a missing dependency. Extend this in a user
+# profile for whichever game you are scanning.
+base_ids = [
+  # Skyrim
+  "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm",
+  "Dragonborn.esm", "ccBGSSSE001-Fish.esm", "_ResourcePack.esl",
+  # Fallout 4
+  "Fallout4.esm", "DLCRobot.esm", "DLCworkshop01.esm", "DLCCoast.esm",
+  "DLCworkshop02.esm", "DLCworkshop03.esm", "DLCNukaWorld.esm",
+  # Fallout 3 / New Vegas
+  "Fallout3.esm", "FalloutNV.esm",
+  # Oblivion / Morrowind
+  "Oblivion.esm", "Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm",
+  # Starfield
+  "Starfield.esm", "Constellation.esm", "OldMars.esm", "BlueprintShips-Starfield.esm",
+]
