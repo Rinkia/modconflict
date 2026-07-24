@@ -179,5 +179,41 @@ src/
 - [x] Fase 2 — detector
 - [x] Fase 3 — parser Factorio
 - [x] Fase 4 — TUI ratatui
-- [ ] Fase 5 — rifinitura (`--json`, load order)
-- [ ] Minecraft / Skyrim / Farming Simulator
+- [x] Fase 5 — `--json`, load order, **profili di gioco dichiarativi**
+- [ ] Skyrim (formato binario: serve codice, non un profilo)
+
+## 9. Fase 5 — la generalizzazione
+
+La domanda era: qualcosa che non sia legato a un solo gioco, adottabile dalla
+maggior parte dei giochi presenti e futuri.
+
+**Risposta: un gioco non è codice, è un file di dati.** Quasi tutti i giochi
+moderni mettono i metadati dei mod in un JSON/TOML/XML dentro l'archivio. Le
+differenze sono nomi dei campi e sintassi delle dipendenze — nient'altro. Quindi
+`games/*.rs` è stato cancellato e sostituito da:
+
+- `value.rs` — JSON, TOML e XML collassano in un solo albero, con path puntati
+  e un segmento `*` che espande mappe/liste (serve per le tabelle Forge, la cui
+  chiave è l'id del mod stesso e si conosce solo a runtime).
+- `profile.rs` + `profiles/*.toml` — schema del profilo, profili built-in
+  compilati nel binario, profili utente da `--profiles <DIR>` che vincono sui
+  built-in a parità di nome.
+- `parse.rs` — l'unico punto che trasforma forme specifiche nel modello
+  condiviso, guidato interamente dai dati.
+
+Tre forme di dipendenza coprono l'esistente: `prefixed-strings` (Factorio),
+`map` (Fabric), `tables` (Forge). Due forme di load order: `lines` (stile
+`plugins.txt` Skyrim, con prefisso `*` per abilitato) e `json`/`toml`
+(`mod-list.json` Factorio).
+
+**Il limite onesto**: i profili leggono metadati *testuali*. Un gioco che
+nasconde i dati in un binario proprietario (i record `.esp` di Skyrim) richiede
+codice vero. Nessuna configurazione lo sostituisce.
+
+**Costo del nuovo gioco**: da "un modulo Rust + un match arm" a "un file TOML,
+zero ricompilazioni". Fabric, Forge e Farming Simulator sono stati aggiunti così
+— senza toccare il detector.
+
+**Load order**, ora che c'è:
+- i mod disabilitati sono esclusi dall'analisi (non possono confliggere)
+- le sovrapposizioni di file dichiarano *chi vince*, non solo *che esistono*

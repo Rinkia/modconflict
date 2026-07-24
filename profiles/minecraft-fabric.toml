@@ -1,0 +1,28 @@
+# Minecraft, Fabric loader — https://fabricmc.net/wiki/documentation:fabric_mod_json
+name = "minecraft-fabric"
+display_name = "Minecraft (Fabric)"
+metadata_file = "fabric.mod.json"
+format = "json"
+id_field = "id"
+version_field = "version"
+provides_field = "provides"
+
+[[dependencies]]
+field = "depends"
+syntax = "map"
+kind = "required"
+
+[[dependencies]]
+field = "recommends"
+syntax = "map"
+kind = "optional"
+
+[[dependencies]]
+field = "breaks"
+syntax = "map"
+kind = "incompatible"
+
+[[dependencies]]
+field = "conflicts"
+syntax = "map"
+kind = "incompatible"

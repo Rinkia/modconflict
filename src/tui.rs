@@ -226,6 +226,7 @@ mod tests {
         Conflict::FileOverlap {
             path: path.to_string(),
             mods: mods.iter().map(|m| m.to_string()).collect(),
+            winner: None,
         }
     }
 

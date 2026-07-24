@@ -1,6 +1,8 @@
 //! The game-agnostic model. Every game parser fills these types; the detector
 //! reads only these types and never knows which game it is looking at.
 
+use serde::Serialize;
+
 pub type ModId = String;
 
 /// One installed mod: an archive or an extracted folder.
@@ -19,13 +21,14 @@ pub struct ModEntry {
 /// A named thing a mod owns. Today only mod ids; prototype names (Factorio)
 /// and FormIDs (Skyrim) become new `SymbolKind` variants, and the detector
 /// keeps working unchanged.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub struct Symbol {
     pub kind: SymbolKind,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
     ModId,
 }
@@ -40,14 +43,15 @@ impl std::fmt::Display for SymbolKind {
 
 /// A declared dependency. `req` is a version requirement in semver syntax
 /// (Factorio's `>= 1.1.0` parses directly).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Dep {
     pub name: String,
     pub req: Option<String>,
     pub kind: DepKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DepKind {
     /// Must be present and satisfy `req`.
     Required,
@@ -57,7 +61,8 @@ pub enum DepKind {
     Incompatible,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Severity {
     Info,
     Warning,
@@ -75,10 +80,16 @@ impl std::fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Conflict {
     /// Two or more mods ship the same internal path — last one loaded wins.
-    FileOverlap { path: String, mods: Vec<ModId> },
+    /// `winner` is filled in when a load order is available.
+    FileOverlap {
+        path: String,
+        mods: Vec<ModId>,
+        winner: Option<ModId>,
+    },
     /// Two or more mods claim the same identifier.
     DuplicateId { symbol: Symbol, mods: Vec<ModId> },
     /// A required dependency is not installed.
@@ -109,9 +120,10 @@ impl Conflict {
     /// One-line label for list views.
     pub fn title(&self) -> String {
         match self {
-            Conflict::FileOverlap { path, mods } => {
-                format!("{} mods ship {}", mods.len(), path)
-            }
+            Conflict::FileOverlap { path, mods, winner } => match winner {
+                Some(w) => format!("{} mods ship {} ({w} wins)", mods.len(), path),
+                None => format!("{} mods ship {}", mods.len(), path),
+            },
             Conflict::DuplicateId { symbol, mods } => {
                 format!("{} {} claimed by {} mods", symbol.kind, symbol.name, mods.len())
             }
@@ -130,11 +142,21 @@ impl Conflict {
     /// Multi-line explanation with the suggested fix.
     pub fn detail(&self) -> String {
         match self {
-            Conflict::FileOverlap { path, mods } => format!(
-                "Path: {path}\n\nProvided by:\n{}\n\nWhichever mod loads last wins. If this is \
-                 not a deliberate compatibility patch, expect the losing mod's version of this \
-                 file to be silently ignored.",
-                bullets(mods)
+            Conflict::FileOverlap { path, mods, winner } => format!(
+                "Path: {path}\n\nProvided by:\n{}\n\n{}",
+                bullets(mods),
+                match winner {
+                    Some(w) => format!(
+                        "\"{w}\" loads last, so its version of this file is the one the game \
+                         uses. Every other copy above is silently ignored. If that is not what \
+                         you want, change the load order."
+                    ),
+                    None => "Whichever mod loads last wins, and no load order file was found so \
+                             the winner is unknown. If this is not a deliberate compatibility \
+                             patch, expect the losing mod's version of this file to be silently \
+                             ignored."
+                        .to_string(),
+                }
             ),
             Conflict::DuplicateId { symbol, mods } => format!(
                 "{} \"{}\" is claimed by:\n{}\n\nThe game cannot tell these apart. Remove all but \

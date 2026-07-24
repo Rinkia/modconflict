@@ -1,0 +1,12 @@
+# Farming Simulator — modDesc.xml. The mod id is the zip filename, so there is
+# no id_field: the scanner falls back to the filename on purpose.
+name = "farming-simulator"
+display_name = "Farming Simulator"
+metadata_file = "modDesc.xml"
+format = "xml"
+root = "modDesc"
+version_field = "version"
+
+[[dependencies]]
+field = "dependencies.dependency"
+syntax = "prefixed-strings"

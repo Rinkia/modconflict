@@ -3,7 +3,7 @@
 //!
 //! Knows nothing about any specific game.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,14 +11,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
-/// Metadata filenames worth keeping in memory. Everything else is recorded as
-/// a path only, so a folder of 500 jars does not become 500 jars of RAM.
-const METADATA_FILES: &[&str] = &[
-    "info.json",          // Factorio
-    "fabric.mod.json",    // Minecraft (Fabric)
-    "mods.toml",          // Minecraft (Forge)
-    "modDesc.xml",        // Farming Simulator
-];
+/// The metadata filenames to keep in memory, which the profiles decide.
+/// Everything else is recorded as a path only, so a folder of 500 jars does not
+/// become 500 jars of RAM.
+pub type MetadataNames = BTreeSet<String>;
 
 /// One mod as found on disk, before any game-specific interpretation.
 #[derive(Debug, Clone)]
@@ -34,12 +30,12 @@ impl RawMod {
     /// Build an inventory from an in-memory file list, applying the same
     /// metadata rule as a real scan. Used by tests to skip the filesystem.
     #[cfg(test)]
-    pub fn from_files(source: PathBuf, entries: &[(&str, &str)]) -> RawMod {
+    pub fn from_files(source: PathBuf, entries: &[(&str, &str)], names: &MetadataNames) -> RawMod {
         let mut files = Vec::new();
         let mut metadata = HashMap::new();
         for (path, content) in entries {
             let name = normalize(path);
-            if is_metadata(&name) {
+            if is_metadata(&name, names) {
                 metadata.insert(name.clone(), content.as_bytes().to_vec());
             }
             files.push(name);
@@ -53,14 +49,11 @@ impl RawMod {
     }
 
     /// First metadata file whose name matches `filename`, at any depth.
-    ///
-    /// A UTF-8 BOM is stripped: plenty of real mods ship one, and every parser
-    /// downstream (serde_json, toml, xml) chokes on it.
     pub fn metadata_named(&self, filename: &str) -> Option<&[u8]> {
         self.metadata
             .iter()
             .find(|(path, _)| basename(path) == filename)
-            .map(|(_, bytes)| strip_bom(bytes))
+            .map(|(_, bytes)| bytes.as_slice())
     }
 
     /// Filename of the archive or folder, for error messages and fallback ids.
@@ -76,7 +69,7 @@ impl RawMod {
 /// top level is treated as one mod. Unreadable entries are skipped with a
 /// warning rather than aborting the whole scan — one corrupt archive should not
 /// hide the other 200 mods' conflicts.
-pub fn scan_dir(dir: &Path) -> Result<Vec<RawMod>> {
+pub fn scan_dir(dir: &Path, names: &MetadataNames) -> Result<Vec<RawMod>> {
     let entries = std::fs::read_dir(dir)
         .with_context(|| format!("cannot read mod folder {}", dir.display()))?;
 
@@ -84,9 +77,9 @@ pub fn scan_dir(dir: &Path) -> Result<Vec<RawMod>> {
     for entry in entries {
         let path = entry?.path();
         let result = if is_archive(&path) {
-            read_archive(&path)
+            read_archive(&path, names)
         } else if path.is_dir() {
-            read_folder(&path)
+            read_folder(&path, names)
         } else {
             continue;
         };
@@ -108,7 +101,7 @@ fn is_archive(path: &Path) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "zip" | "jar")
 }
 
-fn read_archive(path: &Path) -> Result<RawMod> {
+fn read_archive(path: &Path, names: &MetadataNames) -> Result<RawMod> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
 
@@ -122,7 +115,7 @@ fn read_archive(path: &Path) -> Result<RawMod> {
         }
         let name = normalize(entry.name());
 
-        if is_metadata(&name) {
+        if is_metadata(&name, names) {
             let mut buf = Vec::with_capacity(entry.size() as usize);
             entry.read_to_end(&mut buf)?;
             metadata.insert(name.clone(), buf);
@@ -138,7 +131,7 @@ fn read_archive(path: &Path) -> Result<RawMod> {
     })
 }
 
-fn read_folder(root: &Path) -> Result<RawMod> {
+fn read_folder(root: &Path, names: &MetadataNames) -> Result<RawMod> {
     let mut files = Vec::new();
     let mut metadata = HashMap::new();
 
@@ -151,7 +144,7 @@ fn read_folder(root: &Path) -> Result<RawMod> {
         };
         let name = normalize(&rel.to_string_lossy());
 
-        if is_metadata(&name) {
+        if is_metadata(&name, names) {
             metadata.insert(name.clone(), std::fs::read(entry.path())?);
         }
         files.push(name);
@@ -165,14 +158,8 @@ fn read_folder(root: &Path) -> Result<RawMod> {
     })
 }
 
-fn is_metadata(path: &str) -> bool {
-    METADATA_FILES.contains(&basename(path))
-}
-
-const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
-
-fn strip_bom(bytes: &[u8]) -> &[u8] {
-    bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes)
+fn is_metadata(path: &str, names: &MetadataNames) -> bool {
+    names.contains(basename(path))
 }
 
 fn basename(path: &str) -> &str {
@@ -190,7 +177,7 @@ fn normalize(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{write_folder_mod, write_zip_mod};
+    use crate::testutil::{metadata_names, write_folder_mod, write_zip_mod};
 
     #[test]
     fn finds_zip_and_folder_mods_side_by_side() {
@@ -198,7 +185,7 @@ mod tests {
         write_zip_mod(dir.path(), "alpha_1.0.0.zip", &[("alpha/data.lua", "-- a")]);
         write_folder_mod(dir.path(), "beta_1.0.0", &[("data.lua", "-- b")]);
 
-        let mods = scan_dir(dir.path()).unwrap();
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap();
 
         assert_eq!(mods.len(), 2);
         assert_eq!(mods[0].files, vec!["alpha/data.lua"]);
@@ -217,7 +204,7 @@ mod tests {
             ],
         );
 
-        let mods = scan_dir(dir.path()).unwrap();
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap();
 
         assert_eq!(mods[0].files.len(), 2);
         assert_eq!(mods[0].metadata.len(), 1);
@@ -233,24 +220,10 @@ mod tests {
         std::fs::write(dir.path().join("broken.zip"), b"not actually a zip").unwrap();
         write_zip_mod(dir.path(), "good_1.0.0.zip", &[("good/data.lua", "-- ok")]);
 
-        let mods = scan_dir(dir.path()).unwrap();
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap();
 
         assert_eq!(mods.len(), 1);
         assert_eq!(mods[0].source_name(), "good_1.0.0.zip");
-    }
-
-    #[test]
-    fn strips_a_utf8_bom_from_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        let with_bom = format!("\u{feff}{}", r#"{"name":"alpha"}"#);
-        write_zip_mod(dir.path(), "alpha_1.0.0.zip", &[("alpha/info.json", &with_bom)]);
-
-        let mods = scan_dir(dir.path()).unwrap();
-
-        assert_eq!(
-            mods[0].metadata_named("info.json").unwrap(),
-            br#"{"name":"alpha"}"#
-        );
     }
 
     #[test]

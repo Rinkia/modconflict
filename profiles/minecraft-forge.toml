@@ -1,0 +1,16 @@
+# Minecraft, Forge and NeoForge — META-INF/mods.toml
+name = "minecraft-forge"
+display_name = "Minecraft (Forge/NeoForge)"
+metadata_file = "mods.toml"
+format = "toml"
+id_field = "mods.modId"
+version_field = "mods.version"
+
+# `dependencies` is keyed by the declaring mod's own id, so the key is only
+# known at read time — the `*` segment fans out over whatever it is.
+[[dependencies]]
+field = "dependencies.*"
+syntax = "tables"
+name_field = "modId"
+version_field = "versionRange"
+required_field = "mandatory"

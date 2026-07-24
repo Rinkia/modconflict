@@ -6,11 +6,17 @@ use std::path::{Path, PathBuf};
 
 use zip::write::SimpleFileOptions;
 
-use crate::scan::RawMod;
+use crate::profile;
+use crate::scan::{MetadataNames, RawMod};
+
+/// The metadata filenames every built-in profile looks for.
+pub fn metadata_names() -> MetadataNames {
+    profile::metadata_filenames(&profile::load_all(None).unwrap())
+}
 
 /// An inventory built in memory, without touching disk.
 pub fn raw_mod(source_name: &str, entries: &[(&str, &str)]) -> RawMod {
-    RawMod::from_files(PathBuf::from(source_name), entries)
+    RawMod::from_files(PathBuf::from(source_name), entries, &metadata_names())
 }
 
 /// Write a real zip archive containing `entries` into `dir`.

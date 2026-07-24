@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use crate::loadorder::LoadOrder;
 use crate::model::{Conflict, Dep, DepKind, ModEntry, Symbol};
 
 /// Paths that collide in practically every mod and never mean anything.
@@ -17,18 +18,21 @@ const BORING_PATHS: &[&str] = &[
     "README.md",
 ];
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 pub struct DetectOptions {
     /// Off for games where each mod lives in its own namespace (Factorio), so
     /// identical internal paths are normal rather than a conflict.
     pub check_file_overlap: bool,
+    /// Used to name the winner of a file overlap. Empty when the game has no
+    /// load order file, or the file was not found.
+    pub load_order: LoadOrder,
 }
 
-pub fn detect(mods: &[ModEntry], opts: DetectOptions) -> Vec<Conflict> {
+pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
 
     if opts.check_file_overlap {
-        conflicts.extend(file_overlaps(mods));
+        conflicts.extend(file_overlaps(mods, &opts.load_order));
     }
     conflicts.extend(duplicate_ids(mods));
     conflicts.extend(dependency_problems(mods));
@@ -42,7 +46,7 @@ pub fn detect(mods: &[ModEntry], opts: DetectOptions) -> Vec<Conflict> {
     conflicts
 }
 
-fn file_overlaps(mods: &[ModEntry]) -> Vec<Conflict> {
+fn file_overlaps(mods: &[ModEntry], load_order: &LoadOrder) -> Vec<Conflict> {
     let mut by_path: HashMap<&str, Vec<String>> = HashMap::new();
     for m in mods {
         for f in &m.files {
@@ -58,9 +62,11 @@ fn file_overlaps(mods: &[ModEntry]) -> Vec<Conflict> {
         .filter(|(_, owners)| owners.len() > 1)
         .map(|(path, mut owners)| {
             owners.sort();
+            let winner = load_order.winner(&owners).cloned();
             Conflict::FileOverlap {
                 path: path.to_string(),
                 mods: owners,
+                winner,
             }
         })
         .collect();
@@ -173,9 +179,22 @@ mod tests {
     use super::*;
     use crate::model::SymbolKind;
 
-    const OPTS: DetectOptions = DetectOptions {
-        check_file_overlap: true,
-    };
+    fn opts() -> DetectOptions {
+        DetectOptions {
+            check_file_overlap: true,
+            load_order: LoadOrder::default(),
+        }
+    }
+
+    fn opts_with_order(order: &[&str]) -> DetectOptions {
+        DetectOptions {
+            check_file_overlap: true,
+            load_order: LoadOrder {
+                order: order.iter().map(|s| s.to_string()).collect(),
+                disabled: Default::default(),
+            },
+        }
+    }
 
     fn entry(id: &str, version: &str) -> ModEntry {
         ModEntry {
@@ -201,7 +220,7 @@ mod tests {
     #[test]
     fn no_conflicts_in_a_clean_folder() {
         let mods = vec![entry("alpha", "1.0.0"), entry("beta", "1.0.0")];
-        assert!(detect(&mods, OPTS).is_empty());
+        assert!(detect(&mods, &opts()).is_empty());
     }
 
     #[test]
@@ -211,15 +230,36 @@ mod tests {
         a.files = vec!["assets/stone.png".into()];
         b.files = vec!["assets/stone.png".into()];
 
-        let found = detect(&[a, b], OPTS);
+        let found = detect(&[a, b], &opts());
 
         assert_eq!(
             found,
             vec![Conflict::FileOverlap {
                 path: "assets/stone.png".into(),
                 mods: vec!["alpha".into(), "beta".into()],
+                winner: None,
             }]
         );
+    }
+
+    #[test]
+    fn the_load_order_names_the_winner_of_an_overlap() {
+        let mut a = entry("alpha", "1.0.0");
+        let mut b = entry("beta", "1.0.0");
+        a.files = vec!["assets/stone.png".into()];
+        b.files = vec!["assets/stone.png".into()];
+
+        let found = detect(&[a, b], &opts_with_order(&["beta", "alpha"]));
+
+        assert_eq!(
+            found,
+            vec![Conflict::FileOverlap {
+                path: "assets/stone.png".into(),
+                mods: vec!["alpha".into(), "beta".into()],
+                winner: Some("alpha".into()),
+            }]
+        );
+        assert!(found[0].title().contains("alpha wins"));
     }
 
     #[test]
@@ -229,7 +269,7 @@ mod tests {
         a.files = vec!["META-INF/MANIFEST.MF".into(), "alpha/pack.mcmeta".into()];
         b.files = vec!["META-INF/MANIFEST.MF".into(), "beta/pack.mcmeta".into()];
 
-        assert!(detect(&[a, b], OPTS).is_empty());
+        assert!(detect(&[a, b], &opts()).is_empty());
     }
 
     #[test]
@@ -239,10 +279,11 @@ mod tests {
         a.files = vec!["data.lua".into()];
         b.files = vec!["data.lua".into()];
 
-        let opts = DetectOptions {
+        let disabled_overlap = DetectOptions {
             check_file_overlap: false,
+            ..opts()
         };
-        assert!(detect(&[a, b], opts).is_empty());
+        assert!(detect(&[a, b], &disabled_overlap).is_empty());
     }
 
     #[test]
@@ -251,7 +292,7 @@ mod tests {
         let mut b = entry("beta", "1.0.0");
         b.provides = a.provides.clone();
 
-        let found = detect(&[a, b], OPTS);
+        let found = detect(&[a, b], &opts());
 
         assert_eq!(
             found,
@@ -270,7 +311,7 @@ mod tests {
         let mut a = entry("alpha", "1.0.0");
         a.requires = vec![dep("missing", None, DepKind::Required)];
 
-        let found = detect(&[a], OPTS);
+        let found = detect(&[a], &opts());
 
         assert_eq!(found.len(), 1);
         assert!(matches!(found[0], Conflict::MissingDep { .. }));
@@ -281,7 +322,7 @@ mod tests {
         let mut a = entry("alpha", "1.0.0");
         a.requires = vec![dep("absent", None, DepKind::Optional)];
 
-        assert!(detect(&[a], OPTS).is_empty());
+        assert!(detect(&[a], &opts()).is_empty());
     }
 
     #[test]
@@ -290,7 +331,7 @@ mod tests {
         a.requires = vec![dep("beta", Some(">=2.0.0"), DepKind::Required)];
         let b = entry("beta", "1.5.0");
 
-        let found = detect(&[a, b], OPTS);
+        let found = detect(&[a, b], &opts());
 
         assert_eq!(
             found,
@@ -308,7 +349,7 @@ mod tests {
         a.requires = vec![dep("beta", Some(">=1.0.0"), DepKind::Required)];
         let b = entry("beta", "1.5.0");
 
-        assert!(detect(&[a, b], OPTS).is_empty());
+        assert!(detect(&[a, b], &opts()).is_empty());
     }
 
     #[test]
@@ -317,7 +358,7 @@ mod tests {
         a.requires = vec![dep("beta", Some(">=2.0.0"), DepKind::Optional)];
         let b = entry("beta", "1.0.0");
 
-        let found = detect(&[a, b], OPTS);
+        let found = detect(&[a, b], &opts());
 
         assert_eq!(found.len(), 1);
         assert!(matches!(found[0], Conflict::VersionMismatch { .. }));
@@ -329,7 +370,7 @@ mod tests {
         a.requires = vec![dep("beta", None, DepKind::Incompatible)];
         let b = entry("beta", "1.0.0");
 
-        let found = detect(&[a, b], OPTS);
+        let found = detect(&[a, b], &opts());
 
         assert_eq!(
             found,
@@ -353,7 +394,7 @@ mod tests {
         a.requires = vec![dep("beta", Some(">=1.0.0"), DepKind::Required)];
         let b = entry("beta", "not-a-version");
 
-        assert!(detect(&[a, b], OPTS).is_empty());
+        assert!(detect(&[a, b], &opts()).is_empty());
     }
 
     #[test]
@@ -364,7 +405,7 @@ mod tests {
         b.files = vec!["assets/stone.png".into()];
         a.requires = vec![dep("missing", None, DepKind::Required)];
 
-        let found = detect(&[a, b], OPTS);
+        let found = detect(&[a, b], &opts());
 
         assert_eq!(found.len(), 2);
         assert!(matches!(found[0], Conflict::MissingDep { .. }));

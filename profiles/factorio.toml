@@ -1,0 +1,22 @@
+# Factorio — https://wiki.factorio.com/Tutorial:Mod_structure
+name = "factorio"
+display_name = "Factorio"
+metadata_file = "info.json"
+format = "json"
+id_field = "name"
+version_field = "version"
+
+# Every mod lives under its own `__name__` namespace, so two mods shipping
+# `data.lua` is normal rather than a conflict.
+check_file_overlap = false
+
+[[dependencies]]
+field = "dependencies"
+syntax = "prefixed-strings"
+
+[load_order]
+file = "mod-list.json"
+format = "json"
+path = "mods"
+name_field = "name"
+enabled_field = "enabled"
