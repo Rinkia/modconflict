@@ -5,6 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::loadorder::LoadOrder;
 use crate::model::{Conflict, Dep, DepKind, ModEntry, Symbol};
+use crate::versionreq::{self, Outcome};
 
 /// Paths that collide in practically every mod and never mean anything.
 ///
@@ -32,14 +33,25 @@ pub struct DetectOptions {
     pub metadata_names: BTreeSet<String>,
 }
 
-pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
+/// What detection found, including the requirements it could not verify.
+#[derive(Debug, Default)]
+pub struct Detection {
+    pub conflicts: Vec<Conflict>,
+    /// Version requirements the tool could not read, so made no claim about —
+    /// a Forge Maven range on a game marked semver, an unparseable version.
+    /// Surfaced so the gap is visible rather than silently passing.
+    pub unverified: usize,
+}
+
+pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Detection {
     let mut conflicts = Vec::new();
 
     if opts.check_file_overlap {
         conflicts.extend(file_overlaps(mods, opts));
     }
     conflicts.extend(duplicate_ids(mods));
-    conflicts.extend(dependency_problems(mods));
+    let (deps, unverified) = dependency_problems(mods);
+    conflicts.extend(deps);
 
     // Critical first, then stable by title so output does not jitter between runs.
     conflicts.sort_by(|a, b| {
@@ -47,7 +59,10 @@ pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
             .cmp(&a.severity())
             .then_with(|| a.title().cmp(&b.title()))
     });
-    conflicts
+    Detection {
+        conflicts,
+        unverified,
+    }
 }
 
 fn file_overlaps(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
@@ -113,13 +128,14 @@ fn duplicate_ids(mods: &[ModEntry]) -> Vec<Conflict> {
     out
 }
 
-fn dependency_problems(mods: &[ModEntry]) -> Vec<Conflict> {
+fn dependency_problems(mods: &[ModEntry]) -> (Vec<Conflict>, usize) {
     let installed: HashMap<&str, Option<&str>> = mods
         .iter()
         .map(|m| (m.id.as_str(), m.version.as_deref()))
         .collect();
 
     let mut out = Vec::new();
+    let mut unverified = 0usize;
     for m in mods {
         for dep in &m.requires {
             match dep.kind {
@@ -142,46 +158,31 @@ fn dependency_problems(mods: &[ModEntry]) -> Vec<Conflict> {
                         }
                         continue;
                     };
-                    if let Some(bad) = version_mismatch(dep, *found) {
-                        out.push(Conflict::VersionMismatch {
+                    match check_version(dep, *found) {
+                        Outcome::Satisfied => {}
+                        Outcome::Violated => out.push(Conflict::VersionMismatch {
                             mod_id: m.id.clone(),
                             dep: dep.clone(),
-                            found: bad,
-                        });
+                            found: found.unwrap_or_default().to_string(),
+                        }),
+                        // The presence dependency is met; only the *version*
+                        // could not be checked. Never a false alarm — counted,
+                        // not reported as a conflict.
+                        Outcome::Unverified => unverified += 1,
                     }
                 }
             }
         }
     }
-    out
+    (out, unverified)
 }
 
-/// `Some(found_version)` when the installed version violates the requirement.
-/// Unparseable versions or requirements are treated as satisfied — guessing
-/// would produce false positives, and a false alarm is worse than a miss here.
-fn version_mismatch(dep: &Dep, found: Option<&str>) -> Option<String> {
-    let req_str = dep.req.as_deref()?;
-    let found_str = found?;
-
-    let req = semver::VersionReq::parse(req_str).ok()?;
-    let version = parse_version(found_str)?;
-
-    if req.matches(&version) {
-        None
-    } else {
-        Some(found_str.to_string())
-    }
-}
-
-/// Games are loose about version arity: Factorio ships `0.18` and `1.1.0`
-/// alike. Pad to three components so semver can read both.
-fn parse_version(raw: &str) -> Option<semver::Version> {
-    let padded = match raw.matches('.').count() {
-        0 => format!("{raw}.0.0"),
-        1 => format!("{raw}.0"),
-        _ => raw.to_string(),
+/// A dependency with no version requirement is satisfied by presence alone.
+fn check_version(dep: &Dep, found: Option<&str>) -> Outcome {
+    let (Some(req), Some(found)) = (dep.req.as_deref(), found) else {
+        return Outcome::Satisfied;
     };
-    semver::Version::parse(&padded).ok()
+    versionreq::check(dep.syntax, req, found)
 }
 
 #[cfg(test)]
@@ -227,7 +228,14 @@ mod tests {
             name: name.to_string(),
             req: req.map(str::to_string),
             kind,
+            syntax: Default::default(),
         }
+    }
+
+    /// The tests here predate the unverified count and care only about the
+    /// conflicts, so this keeps them reading `detect(...)` as a list.
+    fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
+        super::detect(mods, opts).conflicts
     }
 
     #[test]
@@ -414,12 +422,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn short_versions_compare_correctly() {
-        assert_eq!(parse_version("0.18"), Some(semver::Version::new(0, 18, 0)));
-        assert_eq!(parse_version("2"), Some(semver::Version::new(2, 0, 0)));
-        assert_eq!(parse_version("1.2.3"), Some(semver::Version::new(1, 2, 3)));
-    }
 
     #[test]
     fn an_unparseable_version_never_raises_a_false_alarm() {

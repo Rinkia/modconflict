@@ -24,6 +24,7 @@ mod snapshot;
 mod testutil;
 mod tui;
 mod value;
+mod versionreq;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

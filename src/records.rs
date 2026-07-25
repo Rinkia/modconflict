@@ -59,6 +59,7 @@ impl RecordScan {
                     name: master.clone(),
                     req: None,
                     kind: DepKind::Required,
+                    syntax: Default::default(),
                 });
             }
         }

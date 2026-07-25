@@ -8,9 +8,13 @@ version_field = "mods.version"
 
 # `dependencies` is keyed by the declaring mod's own id, so the key is only
 # known at read time — the `*` segment fans out over whatever it is.
+#
+# versionRange is Maven syntax (`[40,)`), not semver, so say so — otherwise the
+# requirement would be silently unverifiable.
 [[dependencies]]
 field = "dependencies.*"
 syntax = "tables"
 name_field = "modId"
 version_field = "versionRange"
 required_field = "mandatory"
+version_syntax = "maven"

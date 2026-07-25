@@ -73,6 +73,7 @@ existing ones.
 |-----|---------|
 | `metadata_file` | Filename to look for inside each mod, matched at any depth |
 | `format` | `json`, `toml` or `xml` |
+| `version_syntax` | Dialect of the version requirements: `semver` (default) or `maven` |
 | `detect_extensions` | Identifies the game when it has no metadata file at all |
 | `root` | Path prefix into the document, e.g. `modDesc` for XML |
 | `id_field` | Path to the mod id. Omit it and the filename is used |
@@ -373,6 +374,36 @@ files, and reading it would mean reverse-engineering an undocumented internal
 format that changes between releases. Saying so is more useful than guessing
 wrong about which mod wins.
 
+## Version requirements it can and cannot read
+
+`semver` reads `>=1.1.0`, but Forge writes `[40,)` and Fabric writes `1.20.x`.
+Feeding those to `semver` fails, and the old behaviour was to treat a failed
+parse as *satisfied* — the right call, since a false alarm is worse than a miss,
+but a silent one. Nobody could tell a real pass from a requirement the tool
+simply could not read.
+
+So a check now has three outcomes, not two:
+
+- **Satisfied** / **Violated** — the version was compared.
+- **Unverified** — the requirement or the version could not be read, so no
+  claim is made. Never a false alarm, but no longer silent: the count is
+  reported.
+
+```
+$ modconflict ~/mods --profiles ./semver-forge
+note: 1 version requirement could not be checked (unreadable dialect) — treated as satisfied
+no conflicts found
+```
+
+A profile declares its dialect with `version_syntax`; the default is `semver`,
+which also understands `1.20.x` / `1.20.*` globs. `maven` reads Forge and
+NeoForge ranges — `[40,)`, `[1.19,1.20)`, `(,2.0]`, comma-joined OR-sets, and a
+bare `1.0` as the soft recommendation Maven means by it. With the Forge profile
+set to `maven`, a mod needing `[40,)` against an installed `36` is now a real
+critical, where before it passed unnoticed.
+
+The JSON report carries the same figure as `unverified_requirements`.
+
 ## What it detects
 
 | Check | Severity | Meaning |
@@ -419,6 +450,7 @@ parse.rs      Profile + RawMod -> ModEntry     (data-driven, no per-game code)
 model.rs      ModEntry, Conflict, Severity     (the shared vocabulary)
 conflict.rs   detection: pure function, no I/O (the only logic that matters)
 hash.rs       are the clashing copies the same bytes, or different ones?
+versionreq.rs is a requirement met? satisfied / violated / unverifiable
 loadorder.rs  who is enabled, and who wins an overlap
 manager.rs    Mod Organizer 2: mod priority and plugin order, read-only
 report.rs     text and JSON output

@@ -5,6 +5,7 @@
 
 use crate::model::{Dep, DepKind, ModEntry, Symbol, SymbolKind};
 use crate::profile::{DeclaredKind, DepSyntax, DependencySource, MetadataReader, Profile};
+use crate::versionreq::VersionSyntax;
 use crate::scan::RawMod;
 use crate::value::{self, Value};
 
@@ -113,7 +114,7 @@ fn read_dependencies(doc: &Value, source: &DependencySource) -> Vec<Dep> {
             .flat_map(Value::items)
             .filter_map(Value::as_str)
             .filter(|s| !s.trim().is_empty())
-            .map(|raw| parse_prefixed_dep(raw, source.kind.into()))
+            .map(|raw| parse_prefixed_dep(raw, source.kind.into(), source.version_syntax))
             .collect(),
 
         DepSyntax::Map => doc
@@ -128,6 +129,7 @@ fn read_dependencies(doc: &Value, source: &DependencySource) -> Vec<Dep> {
                 name: name.clone(),
                 req: normalize_req(req.as_str(), source),
                 kind: source.kind.into(),
+                syntax: source.version_syntax,
             })
             .collect(),
 
@@ -160,6 +162,7 @@ fn read_dep_table(table: &Value, source: &DependencySource) -> Option<Dep> {
         name: name.to_string(),
         req,
         kind,
+        syntax: source.version_syntax,
     })
 }
 
@@ -203,7 +206,7 @@ impl From<DeclaredKind> for DepKind {
 /// A plain name with no prefix takes `default_kind`: for Farming Simulator that
 /// is a required dependency, for RimWorld's `incompatibleWith` list the very
 /// same syntax means the opposite.
-fn parse_prefixed_dep(raw: &str, default_kind: DepKind) -> Dep {
+fn parse_prefixed_dep(raw: &str, default_kind: DepKind, syntax: VersionSyntax) -> Dep {
     let text = raw.trim();
 
     let (kind, rest) = if let Some(r) = text.strip_prefix("(?)") {
@@ -219,7 +222,12 @@ fn parse_prefixed_dep(raw: &str, default_kind: DepKind) -> Dep {
     };
 
     let (name, req) = split_version_req(rest.trim());
-    Dep { name, req, kind }
+    Dep {
+        name,
+        req,
+        kind,
+        syntax,
+    }
 }
 
 /// Mod names may contain spaces, so split on the comparator rather than on
@@ -402,7 +410,7 @@ versionRange = "[9,)"
 
     #[test]
     fn keeps_spaces_inside_mod_names() {
-        let dep = parse_prefixed_dep("? Squeak Through >= 1.8", DepKind::Required);
+        let dep = parse_prefixed_dep("? Squeak Through >= 1.8", DepKind::Required, VersionSyntax::default());
 
         assert_eq!(dep.name, "Squeak Through");
         assert_eq!(dep.req.as_deref(), Some(">=1.8"));

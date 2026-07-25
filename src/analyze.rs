@@ -44,6 +44,8 @@ pub struct Analysis {
     pub containers: Vec<String>,
     pub plugins_read: usize,
     pub unreadable_plugins: Vec<String>,
+    /// Version requirements the tool could not read, so made no claim about.
+    pub unverified_requirements: usize,
     /// Everything the scan could not read: unopenable archives, metadata that
     /// blew a limit, entries truncated away. Collected rather than printed so
     /// they reach the JSON report.
@@ -98,7 +100,9 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
         load_order: load_order.clone(),
         metadata_names: profile::metadata_filenames(std::slice::from_ref(&profile)),
     };
-    let mut conflicts = conflict::detect(&mods, &options);
+    let detection = conflict::detect(&mods, &options);
+    let mut conflicts = detection.conflicts;
+    let unverified_requirements = detection.unverified;
 
     let enabled: HashSet<&str> = mods.iter().map(|m| m.id.as_str()).collect();
     conflicts.extend(records.overlaps(&enabled));
@@ -132,6 +136,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
             .collect(),
         plugins_read: records.plugin_count(),
         unreadable_plugins: records.unreadable.clone(),
+        unverified_requirements,
         warnings,
         load_order_known: !load_order.is_empty(),
         manager: found_manager,
@@ -149,6 +154,7 @@ impl Analysis {
             containers: self.containers.clone(),
             plugins_read: self.plugins_read,
             mods_with_metadata: self.mods_with_metadata,
+            unverified_requirements: self.unverified_requirements,
             warnings: &self.warnings,
             manager: self
                 .manager

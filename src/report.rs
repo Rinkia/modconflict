@@ -19,6 +19,9 @@ pub struct Report<'a> {
     /// `mods_scanned` means the profile is wrong for this folder, not that the
     /// folder is clean.
     pub mods_with_metadata: usize,
+    /// Version requirements the tool could not read a claim from. Reported so
+    /// the gap is visible rather than silently passing.
+    pub unverified_requirements: usize,
     /// Everything that could not be read. Reported rather than printed to
     /// stderr, so a `--json` consumer sees it too.
     pub warnings: &'a [String],
@@ -122,6 +125,20 @@ pub fn text(report: &Report) -> String {
         let _ = writeln!(out, "warning: {warning}");
     }
 
+    if report.unverified_requirements > 0 {
+        let _ = writeln!(
+            out,
+            "note: {} version {} could not be checked (unreadable dialect) — \
+             treated as satisfied",
+            report.unverified_requirements,
+            if report.unverified_requirements == 1 {
+                "requirement"
+            } else {
+                "requirements"
+            }
+        );
+    }
+
     match report.manager {
         Some((name, profile)) => {
             let _ = writeln!(out, "load order from {name}, profile \"{profile}\"");
@@ -171,6 +188,7 @@ struct JsonReport<'a> {
     containers_read: usize,
     plugins_read: usize,
     mods_with_metadata: usize,
+    unverified_requirements: usize,
     conflict_count: usize,
     critical_count: usize,
     warnings: &'a [String],
@@ -198,6 +216,7 @@ pub fn json(report: &Report) -> anyhow::Result<String> {
         containers_read: report.containers.len(),
         plugins_read: report.plugins_read,
         mods_with_metadata: report.mods_with_metadata,
+        unverified_requirements: report.unverified_requirements,
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
         warnings: report.warnings,
@@ -259,6 +278,7 @@ mod tests {
                     name: "base".into(),
                     req: Some(">=2.0.0".into()),
                     kind: DepKind::Required,
+                    syntax: Default::default(),
                 },
             },
             Conflict::FileOverlap {
@@ -299,6 +319,7 @@ mod tests {
             containers: Vec::new(),
             plugins_read: 0,
             mods_with_metadata: 3,
+            unverified_requirements: 0,
             warnings: &[],
             manager: None,
             conflicts: &conflicts,
@@ -330,6 +351,7 @@ mod tests {
             containers: Vec::new(),
             plugins_read: 0,
             mods_with_metadata: 3,
+            unverified_requirements: 0,
             warnings: &[],
             manager: None,
             conflicts: &conflicts,
@@ -353,6 +375,7 @@ mod tests {
             containers: Vec::new(),
             plugins_read: 0,
             mods_with_metadata: 3,
+            unverified_requirements: 0,
             warnings: &[],
             manager: None,
             conflicts: &conflicts,

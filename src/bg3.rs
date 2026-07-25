@@ -49,6 +49,7 @@ pub fn read(path: &Path) -> Result<Extracted> {
                     // every legitimately updated mod.
                     req: None,
                     kind: DepKind::Required,
+                    syntax: Default::default(),
                 })
             })
             .collect(),

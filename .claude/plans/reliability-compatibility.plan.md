@@ -382,3 +382,37 @@ L'hashing serve a tagliare i falsi allarmi, non a modificare l'installazione.
 **Resta**: metà Fase 13 (dialetti di versione — i `warnings` nel JSON sono
 arrivati con la Fase 10), e il corpus reale, che serve ancora una persona con
 dei mod.
+
+
+---
+
+## 15. Fase 13 — completata
+
+La prima metà (i `warnings` nel JSON) era arrivata con la Fase 10. Questa è la
+seconda: i dialetti di versione e l'esito `Unverified` non silenzioso.
+
+**Le due bugie per omissione, chiuse.** `version_mismatch` restituiva
+`Option<String>`: `None` significava sia "soddisfatto" sia "non so leggere il
+requisito". La scelta di non gridare al lupo era giusta, ma il buco era
+invisibile. Ora `versionreq::check` restituisce `Satisfied` / `Violated` /
+`Unverified`, e gli `Unverified` sono contati e riportati (testo + JSON).
+
+**Parser Maven** (`versionreq.rs`): `[40,)`, `[1.19,1.20)`, `(,2.0]`, versione
+esatta `[1.19.2]`, OR di range separati da virgola, e la versione nuda come
+raccomandazione soft. Il profilo dichiara il dialetto con `version_syntax`
+(default semver, che gestisce anche i glob `1.20.x`/`1.20.*`).
+
+**Prova dal vivo, entrambe le direzioni:**
+- Forge 36 contro `[40,)` con `version_syntax = "maven"`: ora **CRIT**, prima
+  passava inosservato.
+- Stesso range con un profilo utente semver: `note: 1 version requirement could
+  not be checked` — il buco reso visibile invece di un falso "pulito".
+
+**Difetto trovato dai test, non dal design**: `parse_version` esisteva in due
+copie (conflict.rs e la nuova versionreq.rs); la versione nuova gestisce anche
+il prefisso `v` di Bannerlord e le quattro-componenti di Farming Simulator. La
+vecchia è stata rimossa, i suoi test spostati.
+
+**Tutte le fasi del piano affidabilità/compatibilità sono chiuse.** Resta solo
+il corpus reale, che richiede una persona con dei mod veri da far girare
+attraverso l'harness della Fase 9.

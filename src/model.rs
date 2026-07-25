@@ -3,6 +3,8 @@
 
 use serde::Serialize;
 
+use crate::versionreq::VersionSyntax;
+
 pub type ModId = String;
 
 /// One installed mod: an archive or an extracted folder.
@@ -56,6 +58,14 @@ pub struct Dep {
     pub name: String,
     pub req: Option<String>,
     pub kind: DepKind,
+    /// Which dialect `req` is written in. Serialized as a plain string; the
+    /// default (semver) is the common case.
+    #[serde(skip_serializing_if = "is_default_syntax")]
+    pub syntax: VersionSyntax,
+}
+
+fn is_default_syntax(syntax: &VersionSyntax) -> bool {
+    *syntax == VersionSyntax::default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

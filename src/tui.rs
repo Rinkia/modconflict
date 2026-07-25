@@ -238,6 +238,7 @@ mod tests {
                 name: dep.to_string(),
                 req: None,
                 kind: DepKind::Required,
+                syntax: Default::default(),
             },
         }
     }

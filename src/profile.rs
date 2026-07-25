@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::scan::RawMod;
 use crate::value::Format;
+use crate::versionreq::VersionSyntax;
 
 /// Profiles compiled into the binary. Users can add their own without
 /// recompiling; see `load_dir`.
@@ -205,6 +206,10 @@ pub struct DependencySource {
     /// every later major version.
     #[serde(default)]
     pub version_prefix: Option<String>,
+    /// The dialect the version requirements in this source are written in.
+    /// Forge's `versionRange` is Maven; the default is semver.
+    #[serde(default)]
+    pub version_syntax: VersionSyntax,
 }
 
 fn required() -> DeclaredKind {
