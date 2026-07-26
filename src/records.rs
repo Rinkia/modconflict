@@ -221,9 +221,7 @@ fn compare(loaded: &[Loaded], manager: Option<&ManagerData>) -> Vec<Conflict> {
             let plugins = vec![a.filename.clone(), b.filename.clone()];
             // Only a mod manager knows the plugin order, so without one the
             // report says two plugins clash but not which survives.
-            let winner = manager
-                .and_then(|m| m.plugin_winner(&plugins))
-                .cloned();
+            let winner = manager.and_then(|m| m.plugin_winner(&plugins)).cloned();
 
             conflicts.push(Conflict::RecordOverlap {
                 plugins,
@@ -372,9 +370,10 @@ mod tests {
 
         let (_, mods) = run(dir.path());
 
-        assert!(mods[0].provides.iter().any(|s| {
-            s.kind == SymbolKind::PluginFile && s.name == "A.esp"
-        }));
+        assert!(mods[0]
+            .provides
+            .iter()
+            .any(|s| { s.kind == SymbolKind::PluginFile && s.name == "A.esp" }));
     }
 
     #[test]

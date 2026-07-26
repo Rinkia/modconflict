@@ -145,7 +145,10 @@ fn every_profile_with_a_metadata_file_has_a_fixture_and_matches_it() {
         checked += 1;
     }
 
-    assert!(checked > 0, "no profiles were checked — is the fixture path right?");
+    assert!(
+        checked > 0,
+        "no profiles were checked — is the fixture path right?"
+    );
 }
 
 #[test]

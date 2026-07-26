@@ -31,6 +31,20 @@ pub struct DetectOptions {
     /// Metadata filenames every mod of this game carries, which therefore
     /// overlap everywhere and mean nothing.
     pub metadata_names: BTreeSet<String>,
+    /// When false (the usual case), two paths differing only in case are the
+    /// same file — Windows and most game engines fold case, so they collide.
+    pub case_sensitive_paths: bool,
+}
+
+/// The key two paths overlap on. Case-folded unless the game is one of the rare
+/// ones that keeps case-distinct files. Extension and plugin comparisons across
+/// the codebase already fold case; the overlap key was the one that did not.
+pub fn overlap_key(path: &str, case_sensitive: bool) -> String {
+    if case_sensitive {
+        path.to_string()
+    } else {
+        path.to_ascii_lowercase()
+    }
 }
 
 /// What detection found, including the requirements it could not verify.
@@ -66,24 +80,37 @@ pub fn detect(mods: &[ModEntry], opts: &DetectOptions) -> Detection {
 }
 
 fn file_overlaps(mods: &[ModEntry], opts: &DetectOptions) -> Vec<Conflict> {
-    let mut by_path: HashMap<&str, Vec<String>> = HashMap::new();
+    // Keyed on the case-folded path so `Iron.dds` and `iron.dds` collide, but
+    // the original casing of the first sighting is kept for the report.
+    let mut by_key: HashMap<String, (String, Vec<String>)> = HashMap::new();
     for m in mods {
         for f in &m.files {
             if is_boring(f, &opts.metadata_names) {
                 continue;
             }
-            by_path.entry(f.as_str()).or_default().push(m.id.clone());
+            let key = overlap_key(f, opts.case_sensitive_paths);
+            by_key
+                .entry(key)
+                .or_insert_with(|| (f.clone(), Vec::new()))
+                .1
+                .push(m.id.clone());
         }
     }
 
-    let mut out: Vec<Conflict> = by_path
-        .into_iter()
-        .filter(|(_, owners)| owners.len() > 1)
+    let mut out: Vec<Conflict> = by_key
+        .into_values()
         .map(|(path, mut owners)| {
+            // One mod carrying two case-variant spellings (possible in a zip)
+            // is not two mods clashing.
             owners.sort();
+            owners.dedup();
+            (path, owners)
+        })
+        .filter(|(_, owners)| owners.len() > 1)
+        .map(|(path, owners)| {
             let winner = opts.load_order.winner(&owners).cloned();
             Conflict::FileOverlap {
-                path: path.to_string(),
+                path,
                 mods: owners,
                 winner,
                 // Filled in later, by hashing, and only for paths that clashed.
@@ -193,8 +220,7 @@ mod tests {
     fn opts() -> DetectOptions {
         DetectOptions {
             check_file_overlap: true,
-            load_order: LoadOrder::default(),
-            metadata_names: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -205,7 +231,7 @@ mod tests {
                 order: order.iter().map(|s| s.to_string()).collect(),
                 disabled: Default::default(),
             },
-            metadata_names: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -262,6 +288,52 @@ mod tests {
                 identical: false,
             }]
         );
+    }
+
+    #[test]
+    fn paths_differing_only_in_case_collide_by_default() {
+        // Windows and most game engines fold case, so these are one file.
+        let mut a = entry("alpha", "1.0.0");
+        let mut b = entry("beta", "1.0.0");
+        a.files = vec!["Textures/Iron.dds".into()];
+        b.files = vec!["textures/iron.dds".into()];
+
+        let found = detect(&[a, b], &opts());
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        match &found[0] {
+            Conflict::FileOverlap { mods, .. } => {
+                assert_eq!(mods, &["alpha".to_string(), "beta".to_string()]);
+            }
+            other => panic!("expected an overlap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_case_sensitive_game_keeps_them_apart() {
+        let mut a = entry("alpha", "1.0.0");
+        let mut b = entry("beta", "1.0.0");
+        a.files = vec!["data/Thing.lua".into()];
+        b.files = vec!["data/thing.lua".into()];
+
+        let sensitive = DetectOptions {
+            check_file_overlap: true,
+            case_sensitive_paths: true,
+            ..Default::default()
+        };
+
+        // Two genuinely different files on a case-sensitive filesystem.
+        assert!(detect(&[a, b], &sensitive).is_empty());
+    }
+
+    #[test]
+    fn one_mod_with_two_case_variants_is_not_two_mods() {
+        let mut a = entry("alpha", "1.0.0");
+        // A zip can hold both; a case-folding game sees one file, one owner.
+        a.files = vec!["Icon.png".into(), "icon.png".into()];
+        let b = entry("beta", "1.0.0");
+
+        assert!(detect(&[a, b], &opts()).is_empty());
     }
 
     #[test]
@@ -422,7 +494,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn an_unparseable_version_never_raises_a_false_alarm() {
         let mut a = entry("alpha", "1.0.0");
@@ -447,4 +518,3 @@ mod tests {
         assert!(matches!(found[1], Conflict::FileOverlap { .. }));
     }
 }
-

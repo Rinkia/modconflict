@@ -253,7 +253,9 @@ mod tests {
     #[test]
     fn a_missing_load_order_file_is_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let profile = by_name(&load_all(None).unwrap(), "factorio").unwrap().clone();
+        let profile = by_name(&load_all(None).unwrap(), "factorio")
+            .unwrap()
+            .clone();
 
         let order = read(&profile, dir.path(), None).unwrap();
 
@@ -270,7 +272,9 @@ mod tests {
             r#"{"mods":[{"name":"base","enabled":true}]}"#,
         )
         .unwrap();
-        let profile = by_name(&load_all(None).unwrap(), "factorio").unwrap().clone();
+        let profile = by_name(&load_all(None).unwrap(), "factorio")
+            .unwrap()
+            .clone();
 
         let order = read(&profile, &mods, None).unwrap();
 

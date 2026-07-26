@@ -27,12 +27,27 @@ pub fn resolve_identical(
     raw: &[RawMod],
     mods: &[ModEntry],
     metadata_names: &BTreeSet<String>,
+    case_sensitive: bool,
     warnings: &mut Vec<String>,
 ) {
     let sources: HashMap<&str, &Path> = mods
         .iter()
         .zip(raw)
         .map(|(entry, raw)| (entry.id.as_str(), raw.source.as_path()))
+        .collect();
+    // A mod's own spelling of each of its files, by overlap key — because a
+    // reported overlap path carries only the first mod's casing, but each mod
+    // must be hashed at the path it actually holds on disk.
+    let real_paths: HashMap<&str, HashMap<String, &String>> = mods
+        .iter()
+        .map(|m| {
+            let by_key = m
+                .files
+                .iter()
+                .map(|f| (key(f, case_sensitive), f))
+                .collect();
+            (m.id.as_str(), by_key)
+        })
         .collect();
 
     // Everything to hash, grouped by mod, so an archive is opened once however
@@ -41,11 +56,14 @@ pub fn resolve_identical(
     let mut wanted: BTreeMap<String, HashSet<String>> = BTreeMap::new();
     for conflict in conflicts.iter() {
         if let Conflict::FileOverlap { path, mods, .. } = conflict {
+            let k = key(path, case_sensitive);
             for mod_id in mods {
-                wanted
-                    .entry(mod_id.clone())
-                    .or_default()
-                    .insert(path.clone());
+                if let Some(real) = real_paths.get(mod_id.as_str()).and_then(|m| m.get(&k)) {
+                    wanted
+                        .entry(mod_id.clone())
+                        .or_default()
+                        .insert((*real).clone());
+                }
             }
         }
     }
@@ -53,6 +71,8 @@ pub fn resolve_identical(
         return;
     }
 
+    // Keyed by (mod, overlap key), so a mod's `Iron.dds` and another's
+    // `iron.dds` are compared as the same slot.
     let mut digests: HashMap<(String, String), [u8; 32]> = HashMap::new();
     for (mod_id, paths) in &wanted {
         let Some(source) = sources.get(mod_id.as_str()) else {
@@ -61,7 +81,7 @@ pub fn resolve_identical(
         match hash_files(source, paths) {
             Ok(found) => {
                 for (path, digest) in found {
-                    digests.insert((mod_id.clone(), path), digest);
+                    digests.insert((mod_id.clone(), key(&path, case_sensitive)), digest);
                 }
             }
             Err(e) => warnings.push(format!("cannot hash files in {}: {e:#}", source.display())),
@@ -80,9 +100,10 @@ pub fn resolve_identical(
             continue;
         };
 
+        let k = key(path, case_sensitive);
         let found: Vec<_> = mods
             .iter()
-            .filter_map(|m| digests.get(&(m.clone(), path.clone())))
+            .filter_map(|m| digests.get(&(m.clone(), k.clone())))
             .collect();
         // Every copy has to be readable *and* equal. A file we could not read
         // is not evidence of sameness.
@@ -92,12 +113,21 @@ pub fn resolve_identical(
                 identical_paths
                     .entry(m.clone())
                     .or_default()
-                    .insert(path.clone());
+                    .insert(k.clone());
             }
         }
     }
 
-    conflicts.extend(redundant_mods(mods, &identical_paths, metadata_names));
+    conflicts.extend(redundant_mods(
+        mods,
+        &identical_paths,
+        metadata_names,
+        case_sensitive,
+    ));
+}
+
+fn key(path: &str, case_sensitive: bool) -> String {
+    crate::conflict::overlap_key(path, case_sensitive)
 }
 
 /// A mod every one of whose files is an identical copy of another mod's is not
@@ -109,18 +139,21 @@ fn redundant_mods(
     mods: &[ModEntry],
     identical_paths: &HashMap<String, HashSet<String>>,
     metadata_names: &BTreeSet<String>,
+    case_sensitive: bool,
 ) -> Vec<Conflict> {
     // The manifest is excluded: it necessarily differs, because it carries the
-    // id, and demanding it match would make redundancy undetectable.
-    let owned: HashMap<&str, Vec<&String>> = mods
+    // id, and demanding it match would make redundancy undetectable. Files are
+    // held by overlap key so two mods are compared the way the game sees them.
+    let owned: HashMap<&str, HashSet<String>> = mods
         .iter()
         .map(|m| {
-            let files = m
+            let keys = m
                 .files
                 .iter()
                 .filter(|f| !crate::conflict::is_boring(f, metadata_names))
+                .map(|f| key(f, case_sensitive))
                 .collect();
-            (m.id.as_str(), files)
+            (m.id.as_str(), keys)
         })
         .collect();
 
@@ -130,7 +163,7 @@ fn redundant_mods(
             continue;
         };
         let mine = &owned[entry.id.as_str()];
-        if mine.is_empty() || mine.iter().any(|f| !identical.contains(*f)) {
+        if mine.is_empty() || mine.iter().any(|f| !identical.contains(f)) {
             continue;
         }
 
@@ -144,9 +177,7 @@ fn redundant_mods(
             // A mod contained in a larger one is the redundant half. Between
             // true twins, the later id reports and the earlier is named, so
             // the pair is stated once.
-            .filter(|other| {
-                owned[other.id.as_str()].len() > mine.len() || other.id < entry.id
-            })
+            .filter(|other| owned[other.id.as_str()].len() > mine.len() || other.id < entry.id)
             .map(|other| other.id.as_str())
             .min();
 
@@ -165,10 +196,7 @@ fn redundant_mods(
 ///
 /// Paths that cannot be found are simply absent from the result, which the
 /// caller reads as "not proven identical".
-fn hash_files(
-    source: &Path,
-    paths: &HashSet<String>,
-) -> anyhow::Result<Vec<(String, [u8; 32])>> {
+fn hash_files(source: &Path, paths: &HashSet<String>) -> anyhow::Result<Vec<(String, [u8; 32])>> {
     let mut out = Vec::new();
 
     if source.is_dir() {
@@ -264,6 +292,42 @@ mod tests {
         ));
         assert_eq!(overlap.severity(), crate::model::Severity::Info);
         assert!(overlap.title().contains("identical"));
+    }
+
+    #[test]
+    fn identical_bytes_under_different_case_are_still_recognised() {
+        // The overlap collides case-insensitively; hashing must then find each
+        // mod's own spelling on disk and compare the bytes.
+        let dir = tempfile::tempdir().unwrap();
+        crate::testutil::write_folder_mod(
+            dir.path(),
+            "alpha",
+            &[
+                ("fabric.mod.json", r#"{"id":"alpha","version":"1.0.0"}"#),
+                ("assets/Stone.png", "identical bytes"),
+            ],
+        );
+        crate::testutil::write_folder_mod(
+            dir.path(),
+            "beta",
+            &[
+                ("fabric.mod.json", r#"{"id":"beta","version":"1.0.0"}"#),
+                ("assets/stone.png", "identical bytes"),
+            ],
+        );
+
+        let conflicts = analyze(dir.path(), true);
+
+        assert!(
+            conflicts.iter().any(|c| matches!(
+                c,
+                Conflict::FileOverlap {
+                    identical: true,
+                    ..
+                }
+            )),
+            "{conflicts:#?}"
+        );
     }
 
     #[test]

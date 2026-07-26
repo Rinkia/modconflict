@@ -5,9 +5,9 @@
 
 use crate::model::{Dep, DepKind, ModEntry, Symbol, SymbolKind};
 use crate::profile::{DeclaredKind, DepSyntax, DependencySource, MetadataReader, Profile};
-use crate::versionreq::VersionSyntax;
 use crate::scan::RawMod;
 use crate::value::{self, Value};
+use crate::versionreq::VersionSyntax;
 
 pub fn parse_mod(profile: &Profile, raw: &RawMod) -> ModEntry {
     // No metadata file (Creation Engine) means nothing to parse: the id comes
@@ -151,8 +151,14 @@ fn read_dep_table(table: &Value, source: &DependencySource) -> Option<Dep> {
         .and_then(|r| normalize_req(Some(r), source));
 
     // Either spelling of "this one is optional" downgrades the entry.
-    let required = source.required_field.as_deref().and_then(|f| table.get_str(f));
-    let optional = source.optional_field.as_deref().and_then(|f| table.get_str(f));
+    let required = source
+        .required_field
+        .as_deref()
+        .and_then(|f| table.get_str(f));
+    let optional = source
+        .optional_field
+        .as_deref()
+        .and_then(|f| table.get_str(f));
     let kind = match (required, optional) {
         (Some("false"), _) | (_, Some("true")) => DepKind::Optional,
         _ => source.kind.into(),
@@ -311,17 +317,22 @@ mod tests {
         let entry = parse_mod(&profile("minecraft-fabric"), &raw);
 
         assert_eq!(entry.id, "coolmod");
-        assert!(entry
-            .provides
-            .iter()
-            .any(|s| s.name == "coolmod-api"));
+        assert!(entry.provides.iter().any(|s| s.name == "coolmod-api"));
 
-        let loader = entry.requires.iter().find(|d| d.name == "fabricloader").unwrap();
+        let loader = entry
+            .requires
+            .iter()
+            .find(|d| d.name == "fabricloader")
+            .unwrap();
         assert_eq!(loader.req.as_deref(), Some(">=0.14.0"));
         assert_eq!(loader.kind, DepKind::Required);
 
         // "*" is any version, so it carries no requirement.
-        let mc = entry.requires.iter().find(|d| d.name == "minecraft").unwrap();
+        let mc = entry
+            .requires
+            .iter()
+            .find(|d| d.name == "minecraft")
+            .unwrap();
         assert_eq!(mc.req, None);
 
         let bad = entry.requires.iter().find(|d| d.name == "badmod").unwrap();
@@ -393,7 +404,10 @@ versionRange = "[9,)"
 
     #[test]
     fn a_mod_with_malformed_metadata_still_gets_an_id() {
-        let raw = raw_mod("broken_1.0.0.zip", &[("broken_1.0.0/info.json", "{ not json")]);
+        let raw = raw_mod(
+            "broken_1.0.0.zip",
+            &[("broken_1.0.0/info.json", "{ not json")],
+        );
 
         let entry = parse_mod(&profile("factorio"), &raw);
 
@@ -410,7 +424,11 @@ versionRange = "[9,)"
 
     #[test]
     fn keeps_spaces_inside_mod_names() {
-        let dep = parse_prefixed_dep("? Squeak Through >= 1.8", DepKind::Required, VersionSyntax::default());
+        let dep = parse_prefixed_dep(
+            "? Squeak Through >= 1.8",
+            DepKind::Required,
+            VersionSyntax::default(),
+        );
 
         assert_eq!(dep.name, "Squeak Through");
         assert_eq!(dep.req.as_deref(), Some(">=1.8"));
@@ -419,8 +437,14 @@ versionRange = "[9,)"
 
     #[test]
     fn does_not_read_the_ge_operator_as_two_operators() {
-        assert_eq!(split_version_req("base >= 1.1.0").1.as_deref(), Some(">=1.1.0"));
-        assert_eq!(split_version_req("base > 1.1.0").1.as_deref(), Some(">1.1.0"));
+        assert_eq!(
+            split_version_req("base >= 1.1.0").1.as_deref(),
+            Some(">=1.1.0")
+        );
+        assert_eq!(
+            split_version_req("base > 1.1.0").1.as_deref(),
+            Some(">1.1.0")
+        );
     }
 
     #[test]

@@ -92,7 +92,10 @@ fn check_semver(req: &str, version: &semver::Version) -> Outcome {
 fn normalize_glob(req: &str) -> String {
     let trimmed = req.trim();
     let lower = trimmed.to_ascii_lowercase();
-    let Some(prefix) = lower.strip_suffix(".x").or_else(|| lower.strip_suffix(".*")) else {
+    let Some(prefix) = lower
+        .strip_suffix(".x")
+        .or_else(|| lower.strip_suffix(".*"))
+    else {
         return trimmed.to_string();
     };
 

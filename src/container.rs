@@ -130,7 +130,9 @@ fn sniff(path: &Path) -> anyhow::Result<Option<&'static ContainerFormat>> {
 /// `BSA\0` (Oblivion onwards), `BTDX` (Fallout 4 onwards), or Morrowind's
 /// version-number-as-magic `0x100`.
 fn sniff_bethesda(head: &[u8]) -> bool {
-    head.starts_with(b"BSA\0") || head.starts_with(b"BTDX") || head.starts_with(&0x100u32.to_le_bytes())
+    head.starts_with(b"BSA\0")
+        || head.starts_with(b"BTDX")
+        || head.starts_with(&0x100u32.to_le_bytes())
 }
 
 fn read_bethesda(path: &Path) -> anyhow::Result<Vec<String>> {
@@ -235,14 +237,8 @@ mod tests {
         assert!(sniff_larian(b"LSPK   "));
         // The Unreal sniff is permissive by necessity, so ordering is what
         // keeps a Larian pak out of its hands.
-        let larian = FORMATS
-            .iter()
-            .position(|f| f.name == "Larian pak")
-            .unwrap();
-        let unreal = FORMATS
-            .iter()
-            .position(|f| f.name == "Unreal pak")
-            .unwrap();
+        let larian = FORMATS.iter().position(|f| f.name == "Larian pak").unwrap();
+        let unreal = FORMATS.iter().position(|f| f.name == "Unreal pak").unwrap();
         assert!(larian < unreal);
     }
 
@@ -311,7 +307,10 @@ mod tests {
 
     #[test]
     fn normalizes_separators_in_archive_paths() {
-        assert_eq!(normalize("textures\\armor\\iron.dds"), "textures/armor/iron.dds");
+        assert_eq!(
+            normalize("textures\\armor\\iron.dds"),
+            "textures/armor/iron.dds"
+        );
         assert_eq!(normalize("/meshes/x.nif"), "meshes/x.nif");
     }
 }

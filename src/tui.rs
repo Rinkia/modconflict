@@ -163,11 +163,7 @@ fn draw(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    let title = format!(
-        " Conflicts {}/{} ",
-        app.visible.len(),
-        app.conflicts.len()
-    );
+    let title = format!(" Conflicts {}/{} ", app.visible.len(), app.conflicts.len());
     let list = List::new(items)
         .block(Block::bordered().title(title))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))

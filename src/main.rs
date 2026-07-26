@@ -1,6 +1,7 @@
 mod analyze;
 mod bg3;
 mod conflict;
+mod container;
 #[cfg(test)]
 mod corpus;
 #[cfg(test)]
@@ -8,7 +9,6 @@ mod fixtures;
 mod hash;
 #[cfg(test)]
 mod hostile;
-mod container;
 mod limits;
 mod loadorder;
 mod manager;
@@ -31,7 +31,6 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
-
 
 /// Scan a game mod folder and report conflicts before the game crashes.
 #[derive(Parser)]
@@ -240,10 +239,9 @@ mod tests {
 
         // Without a load order the overlap is still reported, winner unknown.
         let (_, conflicts) = analyze(dir.path(), None);
-        assert!(conflicts.iter().any(|c| matches!(
-            c,
-            Conflict::FileOverlap { winner: None, .. }
-        )));
+        assert!(conflicts
+            .iter()
+            .any(|c| matches!(c, Conflict::FileOverlap { winner: None, .. })));
     }
 
     /// The point of the container layer: a texture packed inside a `.bsa` and a
@@ -268,7 +266,10 @@ mod tests {
         write_folder_mod(
             dir.path(),
             "LooseMod",
-            &[("textures/armor/iron.dds", "different bytes"), ("Loose.esp", "TES4")],
+            &[
+                ("textures/armor/iron.dds", "different bytes"),
+                ("Loose.esp", "TES4"),
+            ],
         );
 
         let (game, conflicts) = analyze(dir.path(), None);
@@ -389,9 +390,13 @@ mod tests {
         // MO2 writes highest priority first, so WinnerMod on top wins.
         let profile = root.path().join("profiles").join("Default");
         std::fs::create_dir_all(&profile).unwrap();
-        std::fs::write(profile.join("modlist.txt"), "+WinnerMod
+        std::fs::write(
+            profile.join("modlist.txt"),
+            "+WinnerMod
 +LoserMod
-").unwrap();
+",
+        )
+        .unwrap();
         std::fs::write(
             profile.join("plugins.txt"),
             "*Skyrim.esm
@@ -432,7 +437,9 @@ selected_profile=Default
             .find(|c| matches!(c, Conflict::RecordOverlap { .. }))
             .expect("the shared record must be reported");
         match record {
-            Conflict::RecordOverlap { winner, records, .. } => {
+            Conflict::RecordOverlap {
+                winner, records, ..
+            } => {
                 assert_eq!(*records, 1);
                 assert_eq!(winner.as_deref(), Some("Winner.esp"));
             }
@@ -460,14 +467,14 @@ selected_profile=Default
         let analysis = analyze::run(dir.path(), &analyze::Options::default()).unwrap();
 
         assert!(analysis.manager.is_none());
-        assert!(analysis.conflicts.iter().any(|c| matches!(
-            c,
-            Conflict::FileOverlap { winner: None, .. }
-        )));
-        assert!(analysis.conflicts.iter().any(|c| matches!(
-            c,
-            Conflict::RecordOverlap { winner: None, .. }
-        )));
+        assert!(analysis
+            .conflicts
+            .iter()
+            .any(|c| matches!(c, Conflict::FileOverlap { winner: None, .. })));
+        assert!(analysis
+            .conflicts
+            .iter()
+            .any(|c| matches!(c, Conflict::RecordOverlap { winner: None, .. })));
     }
 
     #[test]

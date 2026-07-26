@@ -1,5 +1,7 @@
 # ModConflict
 
+[![CI](https://github.com/Rinkia/modconflict/actions/workflows/ci.yml/badge.svg)](https://github.com/Rinkia/modconflict/actions/workflows/ci.yml)
+
 Scan a game mod folder and report conflicts **before** the game crashes.
 
 Point it at your mod directory. It reads every archive, works out what each mod
@@ -641,11 +643,11 @@ stronger at one thing — it runs on every `cargo test`.
   above for why.
 - Archives nested inside a `.zip` are not expanded — only archives sitting in a
   mod folder are.
-- Version comparison is semver. Requirements in another dialect — Forge's
-  Maven ranges, for instance — are treated as satisfied rather than guessed at,
-  because a false alarm is worse than a miss here.
 - Factorio prototype-name collisions live inside `data.lua` and would need a
   Lua parser. Only mod-id level checks today.
+- File paths are compared case-insensitively by default, because Windows and
+  most game engines fold case. A profile can set `case_sensitive_paths` for a
+  game that genuinely keeps case-distinct files.
 
 ## Licence
 

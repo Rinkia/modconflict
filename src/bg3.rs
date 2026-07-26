@@ -27,7 +27,8 @@ pub struct Extracted {
 }
 
 pub fn read(path: &Path) -> Result<Extracted> {
-    let pak = Lspk::from_file(path).with_context(|| format!("{}: not a Larian pak", path.display()))?;
+    let pak =
+        Lspk::from_file(path).with_context(|| format!("{}: not a Larian pak", path.display()))?;
     let meta = pak
         .deserialize_meta_lsx()
         .with_context(|| format!("{}: no readable meta.lsx", path.display()))?;
@@ -87,7 +88,12 @@ mod tests {
         let path = write_pak(
             dir.path(),
             "CoolMod",
-            &meta_lsx("11111111-1111-1111-1111-111111111111", "CoolMod", packed, &[]),
+            &meta_lsx(
+                "11111111-1111-1111-1111-111111111111",
+                "CoolMod",
+                packed,
+                &[],
+            ),
         );
 
         let extracted = read(&path).unwrap();

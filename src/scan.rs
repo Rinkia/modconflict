@@ -178,8 +178,8 @@ fn read_archive(path: &Path, names: &MetadataNames, warnings: &mut Vec<String>) 
 }
 
 fn read_container(path: &Path, warnings: &mut Vec<String>) -> Result<RawMod> {
-    let mut archive = container::read(path)?
-        .ok_or_else(|| anyhow::anyhow!("not a container after all"))?;
+    let mut archive =
+        container::read(path)?.ok_or_else(|| anyhow::anyhow!("not a container after all"))?;
     truncate_container(path, &mut archive, warnings);
 
     Ok(RawMod {

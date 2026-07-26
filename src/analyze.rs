@@ -99,6 +99,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
         check_file_overlap: profile.check_file_overlap,
         load_order: load_order.clone(),
         metadata_names: profile::metadata_filenames(std::slice::from_ref(&profile)),
+        case_sensitive_paths: profile.case_sensitive_paths,
     };
     let detection = conflict::detect(&mods, &options);
     let mut conflicts = detection.conflicts;
@@ -116,6 +117,7 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
             raw,
             &mods,
             &options.metadata_names,
+            options.case_sensitive_paths,
             &mut warnings,
         );
     }
@@ -156,10 +158,7 @@ impl Analysis {
             mods_with_metadata: self.mods_with_metadata,
             unverified_requirements: self.unverified_requirements,
             warnings: &self.warnings,
-            manager: self
-                .manager
-                .as_ref()
-                .map(|m| (m.name, m.profile.as_str())),
+            manager: self.manager.as_ref().map(|m| (m.name, m.profile.as_str())),
             conflicts: &self.conflicts,
         }
     }

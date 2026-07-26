@@ -131,6 +131,7 @@ pub enum Conflict {
         duplicate_of: ModId,
         files: usize,
     },
+    #[cfg_attr(not(feature = "records"), allow(dead_code))]
     /// Two plugins edit the same records. Normal and often deliberate — it is
     /// how compatibility patches work — but the later plugin's version of every
     /// shared record is the one that survives.
@@ -176,13 +177,22 @@ impl Conflict {
                 (false, None) => format!("{} mods ship {}", mods.len(), path),
             },
             Conflict::DuplicateId { symbol, mods } => {
-                format!("{} {} claimed by {} mods", symbol.kind, symbol.name, mods.len())
+                format!(
+                    "{} {} claimed by {} mods",
+                    symbol.kind,
+                    symbol.name,
+                    mods.len()
+                )
             }
             Conflict::MissingDep { mod_id, dep } => {
                 format!("{mod_id} needs missing {}", dep.name)
             }
             Conflict::VersionMismatch { mod_id, dep, .. } => {
-                format!("{mod_id} needs {} {}", dep.name, dep.req.as_deref().unwrap_or(""))
+                format!(
+                    "{mod_id} needs {} {}",
+                    dep.name,
+                    dep.req.as_deref().unwrap_or("")
+                )
             }
             Conflict::Incompatible { mod_id, other } => {
                 format!("{mod_id} is incompatible with {other}")
@@ -317,7 +327,8 @@ From:
             Conflict::FileOverlap { mods, .. }
             | Conflict::DuplicateId { mods, .. }
             | Conflict::RecordOverlap { mods, .. } => mods.iter().map(String::as_str).collect(),
-            Conflict::MissingDep { mod_id, dep } | Conflict::VersionMismatch { mod_id, dep, .. } => {
+            Conflict::MissingDep { mod_id, dep }
+            | Conflict::VersionMismatch { mod_id, dep, .. } => {
                 vec![mod_id.as_str(), dep.name.as_str()]
             }
             Conflict::Incompatible { mod_id, other } => vec![mod_id.as_str(), other.as_str()],

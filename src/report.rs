@@ -49,9 +49,7 @@ impl Report<'_> {
     /// check. Exiting non-zero over them would train people to ignore the
     /// exit code.
     pub fn has_actionable(&self) -> bool {
-        self.conflicts
-            .iter()
-            .any(|c| c.severity() > Severity::Info)
+        self.conflicts.iter().any(|c| c.severity() > Severity::Info)
     }
 
     /// How much of the folder the profile actually understood, 0.0 to 1.0.
@@ -84,7 +82,11 @@ pub fn text(report: &Report) -> String {
         "{}: scanned {} {}{}",
         report.profile.display_name,
         report.mods_scanned,
-        if report.mods_scanned == 1 { "mod" } else { "mods" },
+        if report.mods_scanned == 1 {
+            "mod"
+        } else {
+            "mods"
+        },
         match report.mods_disabled {
             0 => String::new(),
             n => format!(" ({n} disabled, skipped)"),
@@ -246,10 +248,12 @@ fn summarize(items: &[String]) -> String {
     }
     counts
         .into_iter()
-        .map(|(name, n)| if n == 1 {
-            name.to_string()
-        } else {
-            format!("{name} x{n}")
+        .map(|(name, n)| {
+            if n == 1 {
+                name.to_string()
+            } else {
+                format!("{name} x{n}")
+            }
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -267,7 +271,9 @@ mod tests {
     use crate::profile::{by_name, load_all};
 
     fn profile() -> Profile {
-        by_name(&load_all(None).unwrap(), "factorio").unwrap().clone()
+        by_name(&load_all(None).unwrap(), "factorio")
+            .unwrap()
+            .clone()
     }
 
     fn conflicts() -> Vec<Conflict> {

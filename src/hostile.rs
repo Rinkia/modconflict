@@ -50,8 +50,9 @@ fn a_decompression_bomb_is_skipped_with_a_warning_not_expanded() {
     // But its contents were never read into memory.
     assert!(scan.mods[0].metadata.is_empty());
     assert!(
-        scan.warnings.iter().any(|w| w.contains("decompression bomb")
-            || w.contains("too large for a metadata file")),
+        scan.warnings.iter().any(
+            |w| w.contains("decompression bomb") || w.contains("too large for a metadata file")
+        ),
         "{:?}",
         scan.warnings
     );
@@ -141,11 +142,14 @@ fn a_folder_of_hostile_archives_still_produces_a_report() {
 
     assert_eq!(analysis.profile.name, "factorio");
     assert!(analysis.mods_scanned >= 1);
-    assert!(!analysis.warnings.is_empty(), "the failures must be reported");
+    assert!(
+        !analysis.warnings.is_empty(),
+        "the failures must be reported"
+    );
 }
 
 #[cfg(feature = "records")]
-    #[test]
+#[test]
 fn a_malformed_plugin_never_takes_down_the_record_pass() {
     let dir = tempfile::tempdir().unwrap();
     let broken = dir.path().join("BrokenMod");
@@ -213,10 +217,7 @@ fn an_archive_entry_named_to_escape_the_folder_stays_a_plain_path() {
 
     // Nothing is ever extracted, so traversal cannot happen — but the path is
     // still recorded verbatim rather than resolved, and that is worth pinning.
-    assert!(scan.mods[0]
-        .files
-        .iter()
-        .any(|f| f.contains("etc/passwd")));
+    assert!(scan.mods[0].files.iter().any(|f| f.contains("etc/passwd")));
     assert!(!Path::new("/etc/passwd_modconflict_test").exists());
 }
 
@@ -282,11 +283,17 @@ mod mutation {
     }
 
     const SEEDS: &[(&str, Format)] = &[
-        (r#"{"name":"a","version":"1.0","dependencies":["b >= 1.0"]}"#, Format::Json),
-        ("[[mods]]
+        (
+            r#"{"name":"a","version":"1.0","dependencies":["b >= 1.0"]}"#,
+            Format::Json,
+        ),
+        (
+            "[[mods]]
 modId = \"a\"
 version = \"1.0\"
-", Format::Toml),
+",
+            Format::Toml,
+        ),
         (
             r#"<modDesc descVersion="60"><version>1.0</version></modDesc>"#,
             Format::Xml,
@@ -318,8 +325,12 @@ version = \"1.0\"
         let seeds: [&[u8]; 4] = [
             // Bethesda BSA, Fallout BA2, Larian LSPK, Valve VPK: a plausible
             // header each, written as bytes so no escape can be mangled.
-            &[0x42, 0x53, 0x41, 0x00, 0x68, 0, 0, 0, 0x24, 0, 0, 0, 3, 0, 0, 0],
-            &[0x42, 0x54, 0x44, 0x58, 1, 0, 0, 0, 0x47, 0x4E, 0x52, 0x4C, 2, 0, 0, 0],
+            &[
+                0x42, 0x53, 0x41, 0x00, 0x68, 0, 0, 0, 0x24, 0, 0, 0, 3, 0, 0, 0,
+            ],
+            &[
+                0x42, 0x54, 0x44, 0x58, 1, 0, 0, 0, 0x47, 0x4E, 0x52, 0x4C, 2, 0, 0, 0,
+            ],
             &[0x4C, 0x53, 0x50, 0x4B, 0x12, 0, 0, 0, 8, 0, 0, 0],
             &[0x34, 0x12, 0xAA, 0x55, 2, 0, 0, 0, 0x40, 0, 0, 0],
         ];

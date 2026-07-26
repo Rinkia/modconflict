@@ -123,11 +123,9 @@ impl Value {
 fn from_json(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Array(a) => Value::List(a.iter().map(from_json).collect()),
-        serde_json::Value::Object(o) => Value::Map(
-            o.iter()
-                .map(|(k, v)| (k.clone(), from_json(v)))
-                .collect(),
-        ),
+        serde_json::Value::Object(o) => {
+            Value::Map(o.iter().map(|(k, v)| (k.clone(), from_json(v))).collect())
+        }
         serde_json::Value::String(s) => Value::Str(s.clone()),
         serde_json::Value::Null => Value::Str(String::new()),
         scalar => Value::Str(scalar.to_string()),
@@ -137,11 +135,9 @@ fn from_json(value: &serde_json::Value) -> Value {
 fn from_toml(value: &toml::Value) -> Value {
     match value {
         toml::Value::Array(a) => Value::List(a.iter().map(from_toml).collect()),
-        toml::Value::Table(t) => Value::Map(
-            t.iter()
-                .map(|(k, v)| (k.clone(), from_toml(v)))
-                .collect(),
-        ),
+        toml::Value::Table(t) => {
+            Value::Map(t.iter().map(|(k, v)| (k.clone(), from_toml(v))).collect())
+        }
         toml::Value::String(s) => Value::Str(s.clone()),
         scalar => Value::Str(scalar.to_string()),
     }
@@ -170,7 +166,10 @@ fn from_xml(node: roxmltree::Node, depth: usize) -> Result<Value> {
 
     let mut map: BTreeMap<String, Value> = BTreeMap::new();
     for attr in node.attributes() {
-        map.insert(format!("@{}", attr.name()), Value::Str(attr.value().to_string()));
+        map.insert(
+            format!("@{}", attr.name()),
+            Value::Str(attr.value().to_string()),
+        );
     }
     if !text.is_empty() {
         map.insert("#text".to_string(), Value::Str(text.to_string()));

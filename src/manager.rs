@@ -43,11 +43,13 @@ pub struct ManagerData {
     /// Mods in load order, earliest first, plus the ones switched off.
     pub mod_order: LoadOrder,
     /// Plugin filenames in load order, earliest first.
+    #[cfg_attr(not(feature = "records"), allow(dead_code))]
     pub plugin_order: Vec<String>,
 }
 
 impl ManagerData {
     /// Which of these plugins wins a record overlap: the one loaded last.
+    #[cfg_attr(not(feature = "records"), allow(dead_code))]
     pub fn plugin_winner<'a>(&self, plugins: &'a [String]) -> Option<&'a String> {
         plugins
             .iter()
@@ -89,7 +91,10 @@ pub fn read(mods_dir: &Path, forced: Option<Manager>) -> Result<Option<ManagerDa
 /// An MO2 instance keeps `mods/` and `profiles/` side by side.
 fn mo2_root(mods_dir: &Path) -> Option<PathBuf> {
     let parent = mods_dir.parent()?;
-    parent.join("profiles").is_dir().then(|| parent.to_path_buf())
+    parent
+        .join("profiles")
+        .is_dir()
+        .then(|| parent.to_path_buf())
 }
 
 fn read_mo2(root: &Path) -> Result<ManagerData> {
@@ -257,7 +262,10 @@ mod tests {
 
         let data = read(&dir.path().join("mods"), None).unwrap().unwrap();
 
-        assert_eq!(data.mod_order.order, vec!["\u{65e5}\u{672c}Mod", "\u{c9}p\u{e9}es"]);
+        assert_eq!(
+            data.mod_order.order,
+            vec!["\u{65e5}\u{672c}Mod", "\u{c9}p\u{e9}es"]
+        );
     }
 
     #[test]

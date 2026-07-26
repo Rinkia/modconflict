@@ -52,7 +52,10 @@ pub fn write_folder_mod(dir: &Path, name: &str, entries: &[(&str, &str)]) -> Pat
 pub fn write_bsa(path: &Path, entries: &[&str]) {
     let mut archive = ba2::tes3::Archive::new();
     for name in entries {
-        archive.insert(ba2::tes3::ArchiveKey::from(*name), ba2::tes3::File::default());
+        archive.insert(
+            ba2::tes3::ArchiveKey::from(*name),
+            ba2::tes3::File::default(),
+        );
     }
     let mut out = std::fs::File::create(path).unwrap();
     archive.write(&mut out).unwrap();
@@ -65,6 +68,7 @@ pub fn write_bsa(path: &Path, entries: &[&str]) {
 /// Hand-built bytes, but not unverified: `esplugin` is the authority that reads
 /// them back, and it rejects anything malformed — a test that gets the layout
 /// wrong fails rather than quietly passing.
+#[cfg_attr(not(feature = "records"), allow(dead_code))]
 pub fn write_plugin(path: &Path, masters: &[&str], form_ids: &[u32]) {
     const RECORD_HEADER_LEN: u32 = 24;
 
@@ -104,6 +108,7 @@ pub fn write_plugin(path: &Path, masters: &[&str], form_ids: &[u32]) {
     std::fs::write(path, out).unwrap();
 }
 
+#[cfg_attr(not(feature = "records"), allow(dead_code))]
 fn record_header(kind: &[u8; 4], data_len: u32, form_id: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(24);
     out.extend(kind);
@@ -115,6 +120,7 @@ fn record_header(kind: &[u8; 4], data_len: u32, form_id: u32) -> Vec<u8> {
     out
 }
 
+#[cfg_attr(not(feature = "records"), allow(dead_code))]
 fn subrecord(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(6 + data.len());
     out.extend(kind);

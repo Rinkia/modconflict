@@ -93,6 +93,13 @@ pub struct Profile {
     /// language to navigate; naming a reader is the honest way out.
     #[serde(default)]
     pub metadata_reader: Option<MetadataReader>,
+    /// Whether the game distinguishes two files whose paths differ only in
+    /// case. Almost none do — Windows and most game engines fold case, so
+    /// `Textures/Iron.dds` and `textures/iron.dds` are one file and must
+    /// collide. Off by default; set it only for a game known to be
+    /// case-sensitive, where they really are two files.
+    #[serde(default)]
+    pub case_sensitive_paths: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -105,6 +112,7 @@ pub enum MetadataReader {
 /// Record-level analysis, for Creation Engine games.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(not(feature = "records"), allow(dead_code))]
 pub struct RecordSpec {
     pub game: RecordGame,
     /// Plugin file extensions to parse.
@@ -299,8 +307,8 @@ pub fn load_dir(dir: &Path) -> Result<Vec<Profile>> {
             continue;
         }
         let text = std::fs::read_to_string(&path)?;
-        let profile: Profile = toml::from_str(&text)
-            .with_context(|| format!("invalid profile {}", path.display()))?;
+        let profile: Profile =
+            toml::from_str(&text).with_context(|| format!("invalid profile {}", path.display()))?;
         profiles.push(profile);
     }
     Ok(profiles)

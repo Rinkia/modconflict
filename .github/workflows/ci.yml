@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # A warning is a failure in CI, so drift is caught at the PR, not later.
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # The whole point of this matrix: the tool was written and verified only on
+  # Windows. Path normalization, the BOM strip, the MO2 layout probing and the
+  # case-fold overlap key have never run on Linux or macOS until now.
+  test:
+    name: test / ${{ matrix.os }} / ${{ matrix.features }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        features:
+          - default
+          # esplugin is GPL-3.0 and gated behind `records`; this build must
+          # keep compiling so the source stays MIT-only. See
+          # THIRD-PARTY-NOTICES.md.
+          - no-default-features
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.features }}
+
+      - name: Feature flags
+        id: flags
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            echo "args=--no-default-features" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Format
+        # Formatting is platform- and feature-independent, so check it once.
+        if: matrix.os == 'ubuntu-latest' && matrix.features == 'default'
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets ${{ steps.flags.outputs.args }}
+
+      - name: Test
+        run: cargo test ${{ steps.flags.outputs.args }}

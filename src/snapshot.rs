@@ -111,10 +111,7 @@ fn factorio_json_report() {
 
     let analysis = analyze::run(dir.path(), &Options::default()).unwrap();
 
-    assert_snapshot(
-        "factorio.json",
-        &report::json(&analysis.report()).unwrap(),
-    );
+    assert_snapshot("factorio.json", &report::json(&analysis.report()).unwrap());
 }
 
 #[test]
