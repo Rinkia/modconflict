@@ -1,0 +1,361 @@
+//! End-to-end pipeline tests over real archives on disk, moved out of the
+//! binary when the engine became a library. They drive `analyze::run` the way
+//! the CLI does, without the CLI.
+#![cfg(test)]
+
+use std::path::Path;
+
+use crate::model::Conflict;
+use crate::testutil::{info_json, metadata_names, write_zip_mod};
+use crate::{analyze, loadorder, profile, scan};
+
+/// The same pipeline the CLI runs, over real archives on disk.
+fn analyze(dir: &Path, load_order: Option<&Path>) -> (String, Vec<Conflict>) {
+    let analysis = analyze::run(
+        dir,
+        &analyze::Options {
+            load_order,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    (analysis.profile.name.clone(), analysis.conflicts)
+}
+
+fn factorio_mod(dir: &Path, name: &str, version: &str, deps: &[&str]) {
+    write_zip_mod(
+        dir,
+        &format!("{name}_{version}.zip"),
+        &[(
+            &format!("{name}_{version}/info.json"),
+            &info_json(name, version, deps),
+        )],
+    );
+}
+
+#[test]
+fn finds_the_planted_conflicts_in_a_factorio_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    factorio_mod(dir.path(), "base", "1.1.0", &[]);
+    factorio_mod(dir.path(), "alpha", "1.0.0", &["base >= 2.0.0", "! gamma"]);
+    factorio_mod(dir.path(), "gamma", "1.0.0", &[]);
+    factorio_mod(dir.path(), "delta", "1.0.0", &["nonexistent-mod >= 1.0.0"]);
+
+    let (game, conflicts) = analyze(dir.path(), None);
+
+    assert_eq!(game, "factorio");
+    assert_eq!(conflicts.len(), 3);
+    assert!(conflicts
+        .iter()
+        .any(|c| matches!(c, Conflict::VersionMismatch { .. })));
+    assert!(conflicts
+        .iter()
+        .any(|c| matches!(c, Conflict::Incompatible { .. })));
+    assert!(conflicts
+        .iter()
+        .any(|c| matches!(c, Conflict::MissingDep { .. })));
+}
+
+#[test]
+fn a_clean_folder_reports_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    factorio_mod(dir.path(), "base", "1.1.0", &[]);
+    factorio_mod(dir.path(), "alpha", "1.0.0", &["base >= 1.0.0"]);
+
+    assert!(analyze(dir.path(), None).1.is_empty());
+}
+
+#[test]
+fn a_mod_disabled_in_the_load_order_cannot_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    factorio_mod(dir.path(), "base", "1.1.0", &[]);
+    factorio_mod(dir.path(), "alpha", "1.0.0", &["base >= 2.0.0"]);
+    std::fs::write(
+        dir.path().join("mod-list.json"),
+        r#"{"mods":[{"name":"base","enabled":true},{"name":"alpha","enabled":false}]}"#,
+    )
+    .unwrap();
+
+    // alpha is the only source of conflict, and it is switched off.
+    assert!(analyze(dir.path(), None).1.is_empty());
+}
+
+#[test]
+fn the_load_order_decides_who_wins_an_overlap() {
+    let dir = tempfile::tempdir().unwrap();
+    // Fabric checks file overlap, unlike Factorio.
+    for (name, version) in [("alpha", "1.0.0"), ("beta", "1.0.0")] {
+        write_zip_mod(
+            dir.path(),
+            &format!("{name}.jar"),
+            &[
+                (
+                    "fabric.mod.json",
+                    &format!(r#"{{"id":"{name}","version":"{version}"}}"#),
+                ),
+                ("assets/stone.png", "png"),
+            ],
+        );
+    }
+    let order = dir.path().join("order.txt");
+    std::fs::write(&order, "beta\nalpha\n").unwrap();
+
+    // Fabric has no load_order section, so an explicit file is refused
+    // rather than silently ignored.
+    let profiles = profile::load_all(None).unwrap();
+    let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
+    let profile = profile::detect(&profiles, &raw).unwrap();
+
+    assert_eq!(profile.name, "minecraft-fabric");
+    assert!(loadorder::read(profile, dir.path(), Some(&order)).is_err());
+
+    // Without a load order the overlap is still reported, winner unknown.
+    let (_, conflicts) = analyze(dir.path(), None);
+    assert!(conflicts
+        .iter()
+        .any(|c| matches!(c, Conflict::FileOverlap { winner: None, .. })));
+}
+
+/// The point of the container layer: a texture packed inside a `.bsa` and a
+/// loose copy of the same texture in another mod are the same conflict the
+/// game sees, and a filename-only scan cannot see it at all.
+#[test]
+fn a_file_inside_a_bethesda_archive_collides_with_a_loose_copy() {
+    use crate::testutil::{write_bsa, write_folder_mod};
+
+    let dir = tempfile::tempdir().unwrap();
+
+    // Mod one: an archive containing the texture, plus a plugin.
+    let packed = dir.path().join("PackedMod");
+    std::fs::create_dir(&packed).unwrap();
+    std::fs::write(packed.join("Packed.esp"), b"TES4").unwrap();
+    write_bsa(
+        &packed.join("Packed.bsa"),
+        &["textures/armor/iron.dds", "meshes/armor/iron.nif"],
+    );
+
+    // Mod two: the same texture, loose.
+    write_folder_mod(
+        dir.path(),
+        "LooseMod",
+        &[
+            ("textures/armor/iron.dds", "different bytes"),
+            ("Loose.esp", "TES4"),
+        ],
+    );
+
+    let (game, conflicts) = analyze(dir.path(), None);
+
+    assert_eq!(game, "creation-engine");
+    assert_eq!(conflicts.len(), 1);
+    match &conflicts[0] {
+        Conflict::FileOverlap { path, mods, .. } => {
+            assert_eq!(path, "textures/armor/iron.dds");
+            assert_eq!(mods, &["LooseMod".to_string(), "PackedMod".to_string()]);
+        }
+        other => panic!("expected a file overlap, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_scan_records_which_binary_archives_it_expanded() {
+    use crate::testutil::write_bsa;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mod_dir = dir.path().join("SomeMod");
+    std::fs::create_dir(&mod_dir).unwrap();
+    std::fs::write(mod_dir.join("Some.esp"), b"TES4").unwrap();
+    write_bsa(&mod_dir.join("Some.bsa"), &["textures/a.dds"]);
+
+    let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
+
+    assert_eq!(raw[0].containers, vec!["Bethesda archive"]);
+    assert!(raw[0].files.iter().any(|f| f == "textures/a.dds"));
+    // The archive itself is still listed alongside its contents.
+    assert!(raw[0].files.iter().any(|f| f == "Some.bsa"));
+}
+
+#[test]
+fn an_unreadable_archive_does_not_sink_the_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    let mod_dir = dir.path().join("BrokenMod");
+    std::fs::create_dir(&mod_dir).unwrap();
+    std::fs::write(mod_dir.join("Broken.bsa"), b"BSA\0truncated").unwrap();
+    std::fs::write(mod_dir.join("Broken.esp"), b"TES4").unwrap();
+
+    let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
+
+    assert_eq!(raw.len(), 1);
+    assert!(raw[0].containers.is_empty());
+    assert!(raw[0].files.iter().any(|f| f == "Broken.esp"));
+}
+
+/// A BG3 mod is a bare `.pak` in the folder, with its metadata locked
+/// inside it — the whole path from "file the scanner would have ignored"
+/// to "dependency reported by UUID".
+#[test]
+fn a_folder_of_bg3_paks_is_detected_and_its_uuids_resolved() {
+    use crate::testutil::{bg3_meta_lsx, write_bg3_pak};
+
+    const BASE: &str = "33333333-3333-3333-3333-333333333333";
+    const PATCH: &str = "22222222-2222-2222-2222-222222222222";
+    const ABSENT: &str = "99999999-9999-9999-9999-999999999999";
+
+    let dir = tempfile::tempdir().unwrap();
+    write_bg3_pak(
+        dir.path(),
+        "BaseMod",
+        &bg3_meta_lsx(BASE, "BaseMod", 36028797018963968, &[]),
+    );
+    write_bg3_pak(
+        dir.path(),
+        "PatchMod",
+        &bg3_meta_lsx(PATCH, "PatchMod", 36028797018963968, &[(BASE, "BaseMod")]),
+    );
+    write_bg3_pak(
+        dir.path(),
+        "BrokenPatch",
+        &bg3_meta_lsx(
+            "44444444-4444-4444-4444-444444444444",
+            "BrokenPatch",
+            36028797018963968,
+            &[(ABSENT, "GoneMod")],
+        ),
+    );
+
+    let (game, conflicts) = analyze(dir.path(), None);
+
+    assert_eq!(game, "baldurs-gate-3");
+    // The satisfied dependency is silent; only the absent one is reported.
+    assert_eq!(conflicts.len(), 1);
+    match &conflicts[0] {
+        Conflict::MissingDep { mod_id, dep } => {
+            assert_eq!(mod_id, "44444444-4444-4444-4444-444444444444");
+            assert_eq!(dep.name, ABSENT);
+        }
+        other => panic!("expected a missing dependency, got {other:?}"),
+    }
+}
+
+/// The payoff of reading a mod manager: the Creation Engine profile has no
+/// load order of its own on purpose, so without MO2 the report can say two
+/// mods clash but never which one survives. With it, both winners are named.
+#[cfg(feature = "records")]
+#[test]
+fn mod_organizer_decides_both_kinds_of_winner() {
+    use crate::testutil::{write_folder_mod, write_plugin};
+
+    let root = tempfile::tempdir().unwrap();
+    let mods = root.path().join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+
+    // Two mods editing the same record and shipping the same texture.
+    for (name, plugin) in [("LoserMod", "Loser.esp"), ("WinnerMod", "Winner.esp")] {
+        write_folder_mod(&mods, name, &[("textures/iron.dds", name)]);
+        write_plugin(
+            &mods.join(name).join(plugin),
+            &["Skyrim.esm"],
+            &[0x0000_0ABC],
+        );
+    }
+
+    // MO2 writes highest priority first, so WinnerMod on top wins.
+    let profile = root.path().join("profiles").join("Default");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(
+        profile.join("modlist.txt"),
+        "+WinnerMod
++LoserMod
+",
+    )
+    .unwrap();
+    std::fs::write(
+        profile.join("plugins.txt"),
+        "*Skyrim.esm
+*Loser.esp
+*Winner.esp
+",
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("ModOrganizer.ini"),
+        "[General]
+selected_profile=Default
+",
+    )
+    .unwrap();
+
+    let analysis = analyze::run(&mods, &analyze::Options::default()).unwrap();
+
+    let manager = analysis.manager.as_ref().expect("MO2 should be detected");
+    assert_eq!(manager.profile, "Default");
+
+    let overlap = analysis
+        .conflicts
+        .iter()
+        .find(|c| matches!(c, Conflict::FileOverlap { .. }))
+        .expect("the shared texture must be reported");
+    match overlap {
+        Conflict::FileOverlap { path, winner, .. } => {
+            assert_eq!(path, "textures/iron.dds");
+            assert_eq!(winner.as_deref(), Some("WinnerMod"));
+        }
+        other => panic!("expected a file overlap, got {other:?}"),
+    }
+
+    let record = analysis
+        .conflicts
+        .iter()
+        .find(|c| matches!(c, Conflict::RecordOverlap { .. }))
+        .expect("the shared record must be reported");
+    match record {
+        Conflict::RecordOverlap {
+            winner, records, ..
+        } => {
+            assert_eq!(*records, 1);
+            assert_eq!(winner.as_deref(), Some("Winner.esp"));
+        }
+        other => panic!("expected a record overlap, got {other:?}"),
+    }
+}
+
+/// The same folder without the manager: the clashes are still found, but
+/// nothing claims to know who wins.
+#[cfg(feature = "records")]
+#[test]
+fn without_a_manager_no_winner_is_invented() {
+    use crate::testutil::{write_folder_mod, write_plugin};
+
+    let dir = tempfile::tempdir().unwrap();
+    for (name, plugin) in [("ModA", "A.esp"), ("ModB", "B.esp")] {
+        write_folder_mod(dir.path(), name, &[("textures/iron.dds", name)]);
+        write_plugin(
+            &dir.path().join(name).join(plugin),
+            &["Skyrim.esm"],
+            &[0x0000_0ABC],
+        );
+    }
+
+    let analysis = analyze::run(dir.path(), &analyze::Options::default()).unwrap();
+
+    assert!(analysis.manager.is_none());
+    assert!(analysis
+        .conflicts
+        .iter()
+        .any(|c| matches!(c, Conflict::FileOverlap { winner: None, .. })));
+    assert!(analysis
+        .conflicts
+        .iter()
+        .any(|c| matches!(c, Conflict::RecordOverlap { winner: None, .. })));
+}
+
+#[test]
+fn detection_fails_loudly_on_an_unrecognized_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    write_zip_mod(dir.path(), "mystery.zip", &[("readme.txt", "hello")]);
+
+    let profiles = profile::load_all(None).unwrap();
+    let raw = scan::scan_dir(dir.path(), &metadata_names()).unwrap().mods;
+
+    assert!(profile::detect(&profiles, &raw).is_err());
+}
