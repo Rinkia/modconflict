@@ -1,7 +1,7 @@
 //! The game-agnostic model. Every game parser fills these types; the detector
 //! reads only these types and never knows which game it is looking at.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::versionreq::VersionSyntax;
 
@@ -27,13 +27,13 @@ pub struct ModEntry {
 /// A named thing a mod owns. Today only mod ids; prototype names (Factorio)
 /// and FormIDs (Skyrim) become new `SymbolKind` variants, and the detector
 /// keeps working unchanged.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Symbol {
     pub kind: SymbolKind,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
     ModId,
@@ -53,14 +53,15 @@ impl std::fmt::Display for SymbolKind {
 
 /// A declared dependency. `req` is a version requirement in semver syntax
 /// (Factorio's `>= 1.1.0` parses directly).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dep {
     pub name: String,
     pub req: Option<String>,
     pub kind: DepKind,
     /// Which dialect `req` is written in. Serialized as a plain string; the
-    /// default (semver) is the common case.
-    #[serde(skip_serializing_if = "is_default_syntax")]
+    /// default (semver) is the common case, and an absent field on read means
+    /// the default too.
+    #[serde(default, skip_serializing_if = "is_default_syntax")]
     pub syntax: VersionSyntax,
 }
 
@@ -68,7 +69,7 @@ fn is_default_syntax(syntax: &VersionSyntax) -> bool {
     *syntax == VersionSyntax::default()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DepKind {
     /// Must be present and satisfy `req`.
@@ -79,7 +80,9 @@ pub enum DepKind {
     Incompatible,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, clap::ValueEnum,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Info,
@@ -98,7 +101,7 @@ impl std::fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Conflict {
     /// Two or more mods ship the same internal path — last one loaded wins.
@@ -144,7 +147,35 @@ pub enum Conflict {
     },
 }
 
+/// The conflict variants as a flat enum, so the CLI can filter by kind and
+/// name a value on the command line. The names match the `kind` tag in the
+/// JSON report, which is part of the tool's contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Deserialize)]
+#[value(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictKind {
+    FileOverlap,
+    DuplicateId,
+    MissingDep,
+    VersionMismatch,
+    Incompatible,
+    RedundantMod,
+    RecordOverlap,
+}
+
 impl Conflict {
+    pub fn kind(&self) -> ConflictKind {
+        match self {
+            Conflict::FileOverlap { .. } => ConflictKind::FileOverlap,
+            Conflict::DuplicateId { .. } => ConflictKind::DuplicateId,
+            Conflict::MissingDep { .. } => ConflictKind::MissingDep,
+            Conflict::VersionMismatch { .. } => ConflictKind::VersionMismatch,
+            Conflict::Incompatible { .. } => ConflictKind::Incompatible,
+            Conflict::RedundantMod { .. } => ConflictKind::RedundantMod,
+            Conflict::RecordOverlap { .. } => ConflictKind::RecordOverlap,
+        }
+    }
+
     pub fn severity(&self) -> Severity {
         match self {
             // Identical bytes cannot break anything: whichever copy the game
@@ -318,6 +349,63 @@ From:
                         .to_string(),
                 }
             ),
+        }
+    }
+
+    /// A stable identity for baseline matching: the same conflict on two runs
+    /// produces the same string, so a baseline can hide what was already there
+    /// and surface only what is new. Deliberately excludes volatile detail
+    /// (winner, identical, the found version, record counts) — those can change
+    /// without the conflict being a *different* one.
+    pub fn identity(&self) -> String {
+        // Order-independent join, so a re-sorted mod list is still the same
+        // finding.
+        fn joined(items: &[String]) -> String {
+            let mut v = items.to_vec();
+            v.sort();
+            v.join(",")
+        }
+        match self {
+            Conflict::FileOverlap { path, mods, .. } => {
+                format!("file_overlap|{path}|{}", joined(mods))
+            }
+            Conflict::DuplicateId { symbol, mods } => {
+                format!(
+                    "duplicate_id|{}:{}|{}",
+                    symbol.kind,
+                    symbol.name,
+                    joined(mods)
+                )
+            }
+            Conflict::MissingDep { mod_id, dep } => {
+                format!("missing_dep|{mod_id}|{}", dep.name)
+            }
+            Conflict::VersionMismatch { mod_id, dep, .. } => format!(
+                "version_mismatch|{mod_id}|{}|{}",
+                dep.name,
+                dep.req.as_deref().unwrap_or("")
+            ),
+            Conflict::Incompatible { mod_id, other } => {
+                format!("incompatible|{mod_id}|{other}")
+            }
+            Conflict::RedundantMod {
+                mod_id,
+                duplicate_of,
+                ..
+            } => format!("redundant_mod|{mod_id}|{duplicate_of}"),
+            Conflict::RecordOverlap { plugins, mods, .. } => {
+                format!("record_overlap|{}|{}", joined(plugins), joined(mods))
+            }
+        }
+    }
+
+    /// The internal path this conflict is about, when it has one. Only a file
+    /// overlap names a single path; used by the config `path` glob to suppress
+    /// a deliberate overwrite.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Conflict::FileOverlap { path, .. } => Some(path),
+            _ => None,
         }
     }
 

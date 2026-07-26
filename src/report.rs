@@ -22,6 +22,12 @@ pub struct Report<'a> {
     /// Version requirements the tool could not read a claim from. Reported so
     /// the gap is visible rather than silently passing.
     pub unverified_requirements: usize,
+    /// Conflicts the ignore config removed. Reported so suppression is never
+    /// silent.
+    pub suppressed: usize,
+    /// Conflicts the baseline hid as already-accepted. Reported for the same
+    /// reason.
+    pub baselined: usize,
     /// Everything that could not be read. Reported rather than printed to
     /// stderr, so a `--json` consumer sees it too.
     pub warnings: &'a [String],
@@ -40,16 +46,6 @@ impl Report<'_> {
 
     pub fn is_clean(&self) -> bool {
         self.conflicts.is_empty()
-    }
-
-    /// Whether anything found is worth doing something about.
-    ///
-    /// `Info` findings — identical copies, duplicate installs — are reported
-    /// but change nothing in the game, so they must not fail a pre-launch
-    /// check. Exiting non-zero over them would train people to ignore the
-    /// exit code.
-    pub fn has_actionable(&self) -> bool {
-        self.conflicts.iter().any(|c| c.severity() > Severity::Info)
     }
 
     /// How much of the folder the profile actually understood, 0.0 to 1.0.
@@ -141,6 +137,32 @@ pub fn text(report: &Report) -> String {
         );
     }
 
+    if report.suppressed > 0 {
+        let _ = writeln!(
+            out,
+            "note: {} {} suppressed by config",
+            report.suppressed,
+            if report.suppressed == 1 {
+                "finding"
+            } else {
+                "findings"
+            }
+        );
+    }
+
+    if report.baselined > 0 {
+        let _ = writeln!(
+            out,
+            "note: {} {} match the baseline",
+            report.baselined,
+            if report.baselined == 1 {
+                "finding"
+            } else {
+                "findings"
+            }
+        );
+    }
+
     match report.manager {
         Some((name, profile)) => {
             let _ = writeln!(out, "load order from {name}, profile \"{profile}\"");
@@ -191,6 +213,8 @@ struct JsonReport<'a> {
     plugins_read: usize,
     mods_with_metadata: usize,
     unverified_requirements: usize,
+    suppressed_by_config: usize,
+    matched_baseline: usize,
     conflict_count: usize,
     critical_count: usize,
     warnings: &'a [String],
@@ -219,6 +243,8 @@ pub fn json(report: &Report) -> anyhow::Result<String> {
         plugins_read: report.plugins_read,
         mods_with_metadata: report.mods_with_metadata,
         unverified_requirements: report.unverified_requirements,
+        suppressed_by_config: report.suppressed,
+        matched_baseline: report.baselined,
         conflict_count: report.conflicts.len(),
         critical_count: report.critical_count(),
         warnings: report.warnings,
@@ -326,6 +352,8 @@ mod tests {
             plugins_read: 0,
             mods_with_metadata: 3,
             unverified_requirements: 0,
+            suppressed: 0,
+            baselined: 0,
             warnings: &[],
             manager: None,
             conflicts: &conflicts,
@@ -358,6 +386,8 @@ mod tests {
             plugins_read: 0,
             mods_with_metadata: 3,
             unverified_requirements: 0,
+            suppressed: 0,
+            baselined: 0,
             warnings: &[],
             manager: None,
             conflicts: &conflicts,
@@ -382,6 +412,8 @@ mod tests {
             plugins_read: 0,
             mods_with_metadata: 3,
             unverified_requirements: 0,
+            suppressed: 0,
+            baselined: 0,
             warnings: &[],
             manager: None,
             conflicts: &conflicts,

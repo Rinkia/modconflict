@@ -31,6 +31,12 @@ pub struct Options<'a> {
     /// Off to skip hashing overlapping files. Hashing is the only step that
     /// reads file *contents*, so this is the knob for a very large folder.
     pub skip_hashing: bool,
+    /// Ignore rules to suppress deliberate conflicts. The CLI loads these from
+    /// `modconflict.toml`; other callers pass `Rules::default()` (none).
+    pub ignore: crate::ignore::Rules,
+    /// A baseline of already-accepted conflicts to hide, leaving only what is
+    /// new. Empty (the default) hides nothing.
+    pub baseline: crate::baseline::Baseline,
 }
 
 pub struct Analysis {
@@ -54,6 +60,12 @@ pub struct Analysis {
     /// The mod manager whose files supplied the ordering, if any.
     pub manager: Option<ManagerData>,
     pub conflicts: Vec<Conflict>,
+    /// How many conflicts the ignore config removed from `conflicts`. Reported
+    /// so a config can never hide findings silently.
+    pub suppressed: usize,
+    /// How many conflicts the baseline hid as already-accepted. Reported for
+    /// the same reason.
+    pub baselined: usize,
 }
 
 pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
@@ -127,6 +139,12 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
             .then_with(|| a.title().cmp(&b.title()))
     });
 
+    // User ignore rules run last, on the finished list. The count is kept and
+    // reported — suppression is never silent.
+    let suppressed = opts.ignore.suppress(&mut conflicts);
+    // Then the baseline hides what was already accepted, leaving only the new.
+    let baselined = opts.baseline.apply(&mut conflicts);
+
     Ok(Analysis {
         profile,
         mods_scanned: mods.len(),
@@ -143,6 +161,8 @@ pub fn run(path: &Path, opts: &Options) -> Result<Analysis> {
         load_order_known: !load_order.is_empty(),
         manager: found_manager,
         conflicts,
+        suppressed,
+        baselined,
     })
 }
 
@@ -157,6 +177,8 @@ impl Analysis {
             plugins_read: self.plugins_read,
             mods_with_metadata: self.mods_with_metadata,
             unverified_requirements: self.unverified_requirements,
+            suppressed: self.suppressed,
+            baselined: self.baselined,
             warnings: &self.warnings,
             manager: self.manager.as_ref().map(|m| (m.name, m.profile.as_str())),
             conflicts: &self.conflicts,
@@ -175,6 +197,43 @@ mod tests {
 
         // Nothing to detect: an empty folder is an error, not a silent pass.
         assert!(run(dir.path(), &Options::default()).is_err());
+    }
+
+    #[test]
+    fn an_ignore_config_suppresses_and_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::testutil::write_zip_mod(
+            dir.path(),
+            "alpha_1.0.0.zip",
+            &[(
+                "alpha_1.0.0/info.json",
+                &crate::testutil::info_json("alpha", "1.0.0", &["missingmod >= 1.0.0"]),
+            )],
+        );
+
+        // Baseline: the missing dependency is reported.
+        let bare = run(dir.path(), &Options::default()).unwrap();
+        assert_eq!(bare.conflicts.len(), 1);
+        assert_eq!(bare.suppressed, 0);
+
+        // With a rule silencing that kind, it is gone but counted.
+        std::fs::write(
+            dir.path().join(crate::ignore::CONFIG_NAME),
+            "[[ignore]]\nkind = \"missing_dep\"\n",
+        )
+        .unwrap();
+        let rules = crate::ignore::Config::load(dir.path(), None).unwrap().rules;
+        let filtered = run(
+            dir.path(),
+            &Options {
+                ignore: rules,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(filtered.conflicts.is_empty());
+        assert_eq!(filtered.suppressed, 1);
+        assert!(crate::report::text(&filtered.report()).contains("1 finding suppressed by config"));
     }
 
     #[test]

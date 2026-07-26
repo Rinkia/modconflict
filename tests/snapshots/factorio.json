@@ -8,6 +8,8 @@
   "plugins_read": 0,
   "mods_with_metadata": 3,
   "unverified_requirements": 0,
+  "suppressed_by_config": 0,
+  "matched_baseline": 0,
   "conflict_count": 2,
   "critical_count": 2,
   "warnings": [],

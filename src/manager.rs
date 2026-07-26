@@ -26,8 +26,9 @@ fn lines_without_bom(text: &str) -> impl Iterator<Item = &str> {
     text.trim_start_matches('\u{feff}').lines().map(str::trim)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
 #[value(rename_all = "lower")]
+#[serde(rename_all = "lowercase")]
 pub enum Manager {
     /// Mod Organizer 2, whose profile files are plain text.
     Mo2,
