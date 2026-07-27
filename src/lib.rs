@@ -22,13 +22,23 @@ mod bg3;
 mod conflict;
 mod container;
 mod hash;
-mod limits;
 mod loadorder;
 mod parse;
 mod records;
 mod scan;
-mod value;
 mod versionreq;
+
+// The untrusted-input parsers and their guards. Private in a normal build;
+// made public only under the `fuzzing` feature so the harnesses in fuzz/ can
+// call them directly. Not part of the stable API either way.
+#[cfg(not(feature = "fuzzing"))]
+mod limits;
+#[cfg(feature = "fuzzing")]
+pub mod limits;
+#[cfg(not(feature = "fuzzing"))]
+mod value;
+#[cfg(feature = "fuzzing")]
+pub mod value;
 
 // Test-only support and suites.
 #[cfg(test)]
