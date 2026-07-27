@@ -1,0 +1,45 @@
+//! ModConflict: scan a game mod folder and report conflicts before the game
+//! crashes.
+//!
+//! The crate is split into a library and a thin `main.rs` binary. The library
+//! is the whole engine — everything except command-line parsing — so it can be
+//! fuzzed (`cargo-fuzz` needs a `lib` target), driven from integration tests in
+//! `tests/`, and embedded by other tools. `main.rs` only turns command-line
+//! flags into a call to [`analyze::run`] and prints the [`report`].
+
+// Public engine surface, used by the binary and available to embedders.
+pub mod analyze;
+pub mod baseline;
+pub mod ignore;
+pub mod manager;
+pub mod model;
+pub mod profile;
+pub mod report;
+pub mod tui;
+
+// Internal machinery. Cross-referenced within the crate; not part of the API.
+mod bg3;
+mod conflict;
+mod container;
+mod hash;
+mod limits;
+mod loadorder;
+mod parse;
+mod records;
+mod scan;
+mod value;
+mod versionreq;
+
+// Test-only support and suites.
+#[cfg(test)]
+mod corpus;
+#[cfg(test)]
+mod fixtures;
+#[cfg(test)]
+mod hostile;
+#[cfg(test)]
+mod pipeline_tests;
+#[cfg(test)]
+mod snapshot;
+#[cfg(test)]
+mod testutil;
