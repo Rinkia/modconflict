@@ -1,1 +1,9 @@
 /target
+
+# cargo-fuzz build output and generated inputs. The harnesses and Cargo.toml
+# are tracked; the corpus and crash artifacts are not.
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+/fuzz/Cargo.lock

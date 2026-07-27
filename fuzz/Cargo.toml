@@ -1,0 +1,50 @@
+# Fuzz harnesses, run on a schedule in CI (see .github/workflows/fuzz.yml),
+# not on every PR. Build and run with:
+#
+#     cargo +nightly fuzz run value_json
+#
+# The deterministic mutation test in the main suite (hostile::mutation) stays —
+# it is complementary, catching a fixed set of shapes on every PR, while these
+# explore.
+[package]
+name = "modconflict-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Keep the fuzz crate out of the parent package's build graph.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.modconflict]
+path = ".."
+# `fuzzing` exposes the internal parsers; `default-features = false` drops the
+# GPL `records` feature the harnesses do not touch, keeping the fuzz build MIT.
+default-features = false
+features = ["fuzzing"]
+
+[[bin]]
+name = "value_json"
+path = "fuzz_targets/value_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "value_xml"
+path = "fuzz_targets/value_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "value_toml"
+path = "fuzz_targets/value_toml.rs"
+test = false
+doc = false
+bench = false

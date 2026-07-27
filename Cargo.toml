@@ -15,6 +15,10 @@ repository = "https://github.com/Rinkia/modconflict"
 # See THIRD-PARTY-NOTICES.md.
 default = ["records"]
 records = ["dep:esplugin"]
+# Exposes the internal untrusted-input parsers (`value`, `limits`) so the
+# fuzz harnesses in fuzz/ can hit them directly. Off in every normal build;
+# never part of the stable API.
+fuzzing = []
 
 [dependencies]
 anyhow = "1"

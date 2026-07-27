@@ -612,11 +612,13 @@ after: `roxmltree` recurses while parsing and overflows the stack on a
 unwinding into an error anyone could catch. That was a real one-file denial of
 service, found by writing the test above and watching it crash.
 
-Fuzzing proper needs a nightly toolchain and a library target this crate does
-not have. In its place the suite carries a seeded mutation pass: valid manifests
-and archive headers mutated deterministically and fed to every parser, asserting
-only that control comes back. Weaker than a fuzzer at finding new cases,
-stronger at one thing — it runs on every `cargo test`.
+Real fuzzing lives in `fuzz/`: `cargo-fuzz` harnesses over `value::load` for
+each metadata format, run weekly and on demand in CI (`.github/workflows/fuzz.yml`),
+not on every PR — they need a nightly toolchain and time. The per-PR safety net
+is a seeded mutation pass in the suite: valid manifests and archive headers
+mutated deterministically and fed to every parser, asserting only that control
+comes back. Weaker than a fuzzer at finding new cases, stronger at one thing —
+it runs on every `cargo test`. The two are complementary.
 
 ## Known limits
 
@@ -632,7 +634,6 @@ stronger at one thing — it runs on every `cargo test`.
   attribute values and on angle brackets in comments. Over-counting only makes
   it stricter, which is the safe direction for something whose job is to run
   before a parser that would otherwise crash the process.
-- No real fuzzing yet — see above for what stands in for it.
 
 - Record comparison is pairwise and parses every plugin whole, so a very large
   load order costs time and memory. `--no-records` turns it off.
