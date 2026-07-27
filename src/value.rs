@@ -35,9 +35,30 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Value> {
     let bytes = bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes);
     let text = std::str::from_utf8(bytes).context("file is not valid UTF-8")?;
     match format {
-        Format::Json => Ok(from_json(
-            &serde_json::from_str(text).context("invalid JSON")?,
-        )),
+        // JSONC, not strict JSON: real Minecraft manifests (fabric.mod.json,
+        // pack.mcmeta) carry `//` comments and trailing commas, and the modders
+        // who write them expect the game's lenient loader. serde_json's strict
+        // parser rejects them, so the whole mod falls back to its filename and
+        // the folder looks cleaner than it is — a silent false negative.
+        Format::Json => {
+            // Checked before parsing, like XML: the JSONC parser recurses while
+            // parsing and does not cap its own depth, so a deeply nested
+            // document overflows the stack and aborts the process before any
+            // error could be caught. serde_json used to guard this for us; its
+            // lenient replacement does not.
+            let depth = limits::max_json_depth(text);
+            if depth > limits::MAX_DOCUMENT_DEPTH {
+                bail!(
+                    "JSON nested about {depth} levels deep, past the limit of {}. \
+                     No real manifest is, and parsing it would crash the process.",
+                    limits::MAX_DOCUMENT_DEPTH
+                );
+            }
+            let value = jsonc_parser::parse_to_serde_value(text, &Default::default())
+                .context("invalid JSON")?
+                .context("JSON file has no value")?;
+            Ok(from_json(&value))
+        }
         Format::Toml => Ok(from_toml(&text.parse().context("invalid TOML")?)),
         Format::Xml => {
             // Checked before parsing, not after: roxmltree recurses while
@@ -207,6 +228,29 @@ mod tests {
     fn keeps_numeric_versions_as_written() {
         let v = load(br#"{"version":1.10}"#, Format::Json).unwrap();
         assert_eq!(v.get_str("version"), Some("1.1"));
+    }
+
+    #[test]
+    fn reads_json_with_comments_and_trailing_commas() {
+        // A real fabric.mod.json shape: line and block comments, plus a
+        // trailing comma. serde_json rejects all of these.
+        let jsonc = br#"{
+            // the mod's id
+            "id": "alpha",
+            "version": "1.0.0", /* semantic version */
+            "depends": {
+                "fabricloader": ">=0.14",
+            },
+        }"#;
+        let v = load(jsonc, Format::Json).unwrap();
+        assert_eq!(v.get_str("id"), Some("alpha"));
+        assert_eq!(v.get_str("version"), Some("1.0.0"));
+        assert_eq!(v.get_str("depends.fabricloader"), Some(">=0.14"));
+    }
+
+    #[test]
+    fn a_json_file_with_only_a_comment_is_an_error() {
+        assert!(load(b"// nothing here\n", Format::Json).is_err());
     }
 
     #[test]
