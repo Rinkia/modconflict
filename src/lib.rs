@@ -51,5 +51,10 @@ mod hostile;
 mod pipeline_tests;
 #[cfg(test)]
 mod snapshot;
+// Only the record-scale benchmark (records feature) uses the counting
+// allocator, so it is compiled only there — otherwise its helpers are dead code
+// under `-D warnings` in the no-records build.
+#[cfg(all(test, feature = "records"))]
+mod testmem;
 #[cfg(test)]
 mod testutil;

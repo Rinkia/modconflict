@@ -173,6 +173,8 @@ fn load(game: GameId, path: &Path) -> anyhow::Result<Plugin> {
         let mut plugin = Plugin::new(game, &owned);
         // ponytail: whole-plugin parse holds every record id in memory — a few
         // hundred MB for a 200-plugin load order. Stream it only if that bites.
+        // Measured: `record_scale_stays_within_budget` — 300 synthetic plugins
+        // peak ~13 MB, so the cost tracks real record *content*, not count.
         plugin.parse_file(ParseOptions::whole_plugin())?;
         Ok::<_, esplugin::Error>(plugin)
     }));
@@ -203,7 +205,8 @@ fn compare(loaded: &[Loaded], manager: Option<&ManagerData>) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
 
     // ponytail: O(n^2) pairwise. Fine up to a few hundred plugins, which is a
-    // large load order; bucket by master if it ever is not.
+    // large load order; bucket by master if it ever is not. Measured:
+    // `record_scale_stays_within_budget` — 300 plugins, all-overlap, ~0.3s.
     for (i, a) in loaded.iter().enumerate() {
         for b in loaded.iter().skip(i + 1) {
             // Two plugins from the same mod are shipped together on purpose.
@@ -405,5 +408,72 @@ mod tests {
         // The mod still exists, and still claims the plugin filename.
         assert_eq!(mods.len(), 2);
         assert_eq!(scan.plugin_count(), 2);
+    }
+
+    /// Puts a number on the two `ponytail:` debts in this module — the
+    /// whole-plugin parse that holds every record id in memory, and the O(n^2)
+    /// pairwise compare — before either is optimised. Every plugin edits the
+    /// same records, so every pair overlaps: the worst case for both, and the
+    /// honest upper bound. `#[ignore]`d because it is slow and self-contained;
+    /// run it explicitly:
+    ///
+    /// ```text
+    /// cargo test --release records::tests::record_scale -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "slow scale benchmark; run explicitly with --ignored"]
+    fn record_scale_stays_within_budget() {
+        use std::time::{Duration, Instant};
+
+        const PLUGINS: usize = 300;
+        const FORMS_PER_PLUGIN: usize = 300;
+
+        let dir = tempfile::tempdir().unwrap();
+        let forms: Vec<u32> = (0..FORMS_PER_PLUGIN as u32)
+            .map(|i| 0x0000_1000 + i)
+            .collect();
+        for n in 0..PLUGINS {
+            mod_with_plugin(
+                dir.path(),
+                &format!("Mod{n}"),
+                &format!("P{n}.esp"),
+                &["Skyrim.esm"],
+                &forms,
+            );
+        }
+
+        let profile = creation_engine();
+        let raw = scanner::scan_dir(dir.path(), &metadata_names())
+            .unwrap()
+            .mods;
+        let mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(&profile, m)).collect();
+        let spec = profile.records.clone().unwrap();
+
+        crate::testmem::reset_peak();
+        let before = crate::testmem::current_bytes();
+        let start = Instant::now();
+        let scan = scan(&spec, &raw, &mods, None);
+        let elapsed = start.elapsed();
+        let peak_mb = crate::testmem::peak_bytes().saturating_sub(before) / 1_048_576;
+
+        // Every pair overlaps: 300*299/2 = 44_850.
+        let all: HashSet<&str> = mods.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(scan.overlaps(&all).len(), PLUGINS * (PLUGINS - 1) / 2);
+
+        eprintln!(
+            "record scale: {PLUGINS} plugins x {FORMS_PER_PLUGIN} forms -> {elapsed:?}, peak {peak_mb} MB"
+        );
+
+        // Generous ceilings: the job is to catch an order-of-magnitude
+        // regression (an accidental O(n^3), a per-plugin memory blowup), not
+        // micro-performance. Raise them only for a deliberate, explained change.
+        assert!(
+            elapsed < Duration::from_secs(60),
+            "record pass took {elapsed:?}, past the 60s budget"
+        );
+        assert!(
+            peak_mb < 1024,
+            "record pass peaked at {peak_mb} MB, past the 1 GB budget"
+        );
     }
 }
