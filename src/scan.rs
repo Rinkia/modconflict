@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -130,6 +130,7 @@ fn read_archive(path: &Path, names: &MetadataNames, warnings: &mut Vec<String>) 
 
     let mut files = Vec::new();
     let mut metadata = HashMap::new();
+    let mut containers = Vec::new();
 
     let entry_count = zip.len().min(limits::MAX_ARCHIVE_ENTRIES);
     if zip.len() > limits::MAX_ARCHIVE_ENTRIES {
@@ -164,6 +165,40 @@ fn read_archive(path: &Path, names: &MetadataNames, warnings: &mut Vec<String>) 
                     metadata.insert(name.clone(), buf);
                 }
             }
+        } else if container::is_candidate(Path::new(&name)) {
+            // A binary archive packed inside the zip (a .bsa inside a .zip is
+            // common) contributes the paths inside it, exactly like a loose one
+            // in a folder mod. The container readers work on files, so it is
+            // extracted to a temp file first — guarded against a decompression
+            // bomb and capped so one mod cannot fill the disk.
+            if limits::is_decompression_bomb(entry.size(), entry.compressed_size()) {
+                warnings.push(format!(
+                    "{}: skipping nested {name}: looks like a decompression bomb",
+                    path.display()
+                ));
+            } else if entry.size() > limits::MAX_NESTED_CONTAINER_BYTES {
+                warnings.push(format!(
+                    "{}: skipping nested {name}: {} bytes is too large to expand",
+                    path.display(),
+                    entry.size()
+                ));
+            } else {
+                let ext = name.rsplit('.').next().unwrap_or("");
+                let bounded = entry.by_ref().take(limits::MAX_NESTED_CONTAINER_BYTES);
+                match read_nested_container(bounded, ext) {
+                    Ok(Some(mut archive)) => {
+                        truncate_container(path, &mut archive, warnings);
+                        containers.push(archive.format);
+                        files.extend(archive.files);
+                    }
+                    // The extension matched but it was not really a container.
+                    Ok(None) => {}
+                    Err(e) => warnings.push(format!(
+                        "{}: cannot read nested {name}: {e:#}",
+                        path.display()
+                    )),
+                }
+            }
         }
         files.push(name);
     }
@@ -173,8 +208,20 @@ fn read_archive(path: &Path, names: &MetadataNames, warnings: &mut Vec<String>) 
         source: path.to_path_buf(),
         files,
         metadata,
-        containers: Vec::new(),
+        containers,
     })
+}
+
+/// Extract an archive entry to a temp file (the container readers need a path)
+/// and read the file list out of it. The temp file carries the original
+/// extension so the reader sniffs the right format.
+fn read_nested_container(mut reader: impl Read, ext: &str) -> Result<Option<container::Container>> {
+    let mut temp = tempfile::Builder::new()
+        .suffix(&format!(".{ext}"))
+        .tempfile()?;
+    std::io::copy(&mut reader, temp.as_file_mut())?;
+    temp.as_file_mut().flush()?;
+    container::read(temp.path())
 }
 
 fn read_container(path: &Path, warnings: &mut Vec<String>) -> Result<RawMod> {
@@ -333,6 +380,39 @@ mod tests {
 
         assert_eq!(mods.len(), 1);
         assert_eq!(mods[0].source_name(), "good_1.0.0.zip");
+    }
+
+    #[test]
+    fn a_binary_container_inside_a_zip_is_expanded() {
+        use crate::testutil::write_bsa;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Build a real .bsa, grab its bytes, then pack it into a .zip mod.
+        let bsa = dir.path().join("scratch.bsa");
+        write_bsa(&bsa, &["textures/armor/iron.dds", "meshes/x.nif"]);
+        let bsa_bytes = std::fs::read(&bsa).unwrap();
+        std::fs::remove_file(&bsa).unwrap();
+
+        let zip_path = dir.path().join("packed_1.0.0.zip");
+        let mut w = zip::ZipWriter::new(File::create(&zip_path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        w.start_file("Packed.bsa", opts).unwrap();
+        w.write_all(&bsa_bytes).unwrap();
+        w.start_file("readme.txt", opts).unwrap();
+        w.write_all(b"hi").unwrap();
+        w.finish().unwrap();
+
+        let mods = scan_dir(dir.path(), &metadata_names()).unwrap().mods;
+
+        assert_eq!(mods.len(), 1);
+        // The .bsa's internal paths are now the mod's files, so a texture inside
+        // it can collide with a loose copy elsewhere.
+        assert!(mods[0].files.iter().any(|f| f == "textures/armor/iron.dds"));
+        assert!(mods[0].files.iter().any(|f| f == "meshes/x.nif"));
+        // The .bsa itself is still listed alongside its contents.
+        assert!(mods[0].files.iter().any(|f| f == "Packed.bsa"));
+        assert!(mods[0].containers.contains(&"Bethesda archive"));
     }
 
     #[test]

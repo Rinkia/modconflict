@@ -37,6 +37,13 @@ pub const MAX_DOCUMENT_DEPTH: usize = 100;
 /// way `MAX_DOCUMENT_DEPTH` bounds the stack on a deep one.
 pub const MAX_XML_NODES: u32 = 1_000_000;
 
+/// A binary archive packed inside a `.zip` is extracted to disk before the
+/// path-based container readers can open it, so its size is bounded: a real
+/// `.bsa`/`.ba2` fits well under this, and anything larger is skipped rather
+/// than filling the disk. The ratio guard ([`is_decompression_bomb`]) catches
+/// the other shape — a tiny zip claiming a giant archive.
+pub const MAX_NESTED_CONTAINER_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// An upper bound on how deeply `text` nests XML elements.
 ///
 /// Deliberately a scanner and not a parser: it over-counts on `>` inside
