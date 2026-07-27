@@ -23,10 +23,12 @@ pub const MAX_METADATA_BYTES: u64 = 8 * 1024 * 1024;
 
 /// How deep a metadata document may nest.
 ///
-/// JSON and TOML parsers cap their own recursion. The XML one does not: a
-/// 50,000-deep document overflows the stack inside `roxmltree::Document::parse`
-/// itself, before any of this crate's code runs. A stack overflow aborts the
-/// process — `catch_unwind` cannot save it — so the depth has to be checked
+/// The TOML parser caps its own recursion. The XML and JSON ones do not: a
+/// deeply nested document overflows the stack inside the parser itself, before
+/// any of this crate's code runs. (JSON used to be safe when it went through
+/// `serde_json`, which caps recursion; the JSONC parser that replaced it, to
+/// tolerate comments and trailing commas, does not.) A stack overflow aborts
+/// the process — `catch_unwind` cannot save it — so the depth has to be checked
 /// *before* the parser is handed the text. Real manifests nest a handful of
 /// levels; this leaves an order of magnitude of headroom.
 pub const MAX_DOCUMENT_DEPTH: usize = 100;
@@ -65,6 +67,42 @@ pub fn max_xml_depth(text: &str) -> usize {
                     deepest = deepest.max(depth);
                 }
             }
+        }
+    }
+    deepest
+}
+
+/// An upper bound on how deeply `text` nests JSON objects and arrays.
+///
+/// Like [`max_xml_depth`], a scanner and not a parser: it runs before the JSONC
+/// parser, which would overflow the stack on a deeply nested document. It
+/// tracks string state so the brackets in ordinary values (paths, ranges) do
+/// not count, but deliberately over-counts on brackets inside `//` or `/* */`
+/// comments — over-counting only makes the guard stricter, the safe direction.
+pub fn max_json_depth(text: &str) -> usize {
+    let mut depth: usize = 0;
+    let mut deepest: usize = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for &b in text.as_bytes() {
+        if in_string {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
         }
     }
     deepest
@@ -120,6 +158,20 @@ mod tests {
               <dependencies><dependency>Other</dependency></dependencies>
             </modDesc>"#;
         assert!(max_xml_depth(xml) < 10, "{}", max_xml_depth(xml));
+    }
+
+    #[test]
+    fn measures_json_nesting_ignoring_brackets_in_strings() {
+        assert_eq!(max_json_depth(r#"{"a":{"b":{"c":1}}}"#), 3);
+        assert_eq!(max_json_depth(r#"[[1,2],[3]]"#), 2);
+        // Brackets inside a string are values, not structure.
+        assert_eq!(max_json_depth(r#"{"path":"a[0][1]/b"}"#), 1);
+    }
+
+    #[test]
+    fn a_json_nesting_bomb_is_measured_as_deep() {
+        let json = format!("{}1{}", "[".repeat(5_000), "]".repeat(5_000));
+        assert!(max_json_depth(&json) > MAX_DOCUMENT_DEPTH);
     }
 
     #[test]
