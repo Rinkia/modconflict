@@ -200,10 +200,16 @@ pub fn text(report: &Report) -> String {
     out
 }
 
+/// The JSON report is a public contract, so it carries its own version.
+/// Downstream tools can branch on it; a breaking change to any field name or
+/// meaning bumps this. Additive fields do not.
+pub const SCHEMA_VERSION: u32 = 1;
+
 /// The JSON envelope. Field names are part of the tool's contract, so they are
 /// spelled out here rather than derived from internal type names.
 #[derive(Serialize)]
 struct JsonReport<'a> {
+    schema_version: u32,
     game: &'a str,
     game_display_name: &'a str,
     mods_scanned: usize,
@@ -234,6 +240,7 @@ struct JsonConflict<'a> {
 
 pub fn json(report: &Report) -> anyhow::Result<String> {
     let json = JsonReport {
+        schema_version: SCHEMA_VERSION,
         game: &report.profile.name,
         game_display_name: &report.profile.display_name,
         mods_scanned: report.mods_scanned,

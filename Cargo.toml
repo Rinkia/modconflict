@@ -40,6 +40,7 @@ larian-formats = "0.8.1"
 blake3 = "1.8.5"
 globset = "0.4"
 jsonc-parser = { version = "0.26", features = ["serde"] }
-
-[dev-dependencies]
+rust-ini = "0.21"
+# A container packed inside a .zip is extracted to a temp file before the
+# path-based readers can open it (see scan::read_archive).
 tempfile = "3"

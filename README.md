@@ -74,7 +74,7 @@ existing ones.
 | Key | Meaning |
 |-----|---------|
 | `metadata_file` | Filename to look for inside each mod, matched at any depth |
-| `format` | `json`, `toml` or `xml` |
+| `format` | `json` (comments and trailing commas tolerated), `toml`, `xml`, or `ini` |
 | `version_syntax` | Dialect of the version requirements: `semver` (default) or `maven` |
 | `detect_extensions` | Identifies the game when it has no metadata file at all |
 | `root` | Path prefix into the document, e.g. `modDesc` for XML |
@@ -642,8 +642,9 @@ it runs on every `cargo test`. The two are complementary.
 - The Creation Engine profile has no load order of its own; it needs a mod
   manager to supply one. Mod Organizer 2 is supported, Vortex is not — see
   above for why.
-- Archives nested inside a `.zip` are not expanded — only archives sitting in a
-  mod folder are.
+- A `.zip` inside a `.zip` is not expanded — only binary containers
+  (`.bsa`/`.ba2`/`.vpk`/`.pak`) nested one level inside an archive are, plus
+  those sitting loose in a mod folder.
 - Factorio prototype-name collisions live inside `data.lua` and would need a
   Lua parser. Only mod-id level checks today.
 - File paths are compared case-insensitively by default, because Windows and

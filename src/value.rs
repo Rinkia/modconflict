@@ -24,6 +24,10 @@ pub enum Format {
     Json,
     Toml,
     Xml,
+    /// `key = value` under `[section]` headers. Flat by nature: a section is a
+    /// map of strings, section-less keys sit at the top. Unlocks 7 Days to Die,
+    /// several Unity titles, and parts of the Paradox games.
+    Ini,
 }
 
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -60,6 +64,11 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Value> {
             Ok(from_json(&value))
         }
         Format::Toml => Ok(from_toml(&text.parse().context("invalid TOML")?)),
+        // Flat, so no depth guard: INI cannot nest deep enough to overflow.
+        Format::Ini => {
+            let ini = ini::Ini::load_from_str(text).context("invalid INI")?;
+            Ok(from_ini(&ini))
+        }
         Format::Xml => {
             // Checked before parsing, not after: roxmltree recurses while
             // parsing, and a stack overflow aborts the process rather than
@@ -151,6 +160,25 @@ fn from_json(value: &serde_json::Value) -> Value {
         serde_json::Value::Null => Value::Str(String::new()),
         scalar => Value::Str(scalar.to_string()),
     }
+}
+
+/// Named sections become nested maps (`section.key`); section-less keys sit at
+/// the top level (`key`). Every value is a string, which is all INI has.
+fn from_ini(ini: &ini::Ini) -> Value {
+    let mut root: BTreeMap<String, Value> = BTreeMap::new();
+    for (section, props) in ini.iter() {
+        let map: BTreeMap<String, Value> = props
+            .iter()
+            .map(|(k, v)| (k.to_string(), Value::Str(v.to_string())))
+            .collect();
+        match section {
+            Some(name) => {
+                root.insert(name.to_string(), Value::Map(map));
+            }
+            None => root.extend(map),
+        }
+    }
+    Value::Map(root)
 }
 
 fn from_toml(value: &toml::Value) -> Value {
@@ -263,6 +291,17 @@ mod tests {
     fn reads_a_field_from_toml() {
         let v = load(b"[[mods]]\nmodId=\"alpha\"\nversion=\"1.0\"", Format::Toml).unwrap();
         assert_eq!(v.get_str("mods.modId"), Some("alpha"));
+    }
+
+    #[test]
+    fn reads_a_field_from_ini() {
+        // A section-less key must precede any header, or it joins the section.
+        let ini = b"name = top-level\n\n[mod]\nid = alpha\nversion = 1.0\n";
+        let v = load(ini, Format::Ini).unwrap();
+        assert_eq!(v.get_str("mod.id"), Some("alpha"));
+        assert_eq!(v.get_str("mod.version"), Some("1.0"));
+        // A section-less key is reachable at the top level.
+        assert_eq!(v.get_str("name"), Some("top-level"));
     }
 
     #[test]
