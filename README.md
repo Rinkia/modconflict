@@ -74,7 +74,7 @@ existing ones.
 | Key | Meaning |
 |-----|---------|
 | `metadata_file` | Filename to look for inside each mod, matched at any depth |
-| `format` | `json` (comments and trailing commas tolerated), `toml`, `xml`, or `ini` |
+| `format` | `json` (comments and trailing commas tolerated), `toml`, `xml`, `ini`, or `yaml` |
 | `version_syntax` | Dialect of the version requirements: `semver` (default) or `maven` |
 | `detect_extensions` | Identifies the game when it has no metadata file at all |
 | `root` | Path prefix into the document, e.g. `modDesc` for XML |
