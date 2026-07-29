@@ -45,3 +45,4 @@ warpalib = "0.3"
 # A container packed inside a .zip is extracted to a temp file before the
 # path-based readers can open it (see scan::read_archive).
 tempfile = "3"
+serde_yaml_ng = "0.10.0"

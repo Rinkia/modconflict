@@ -1,5 +1,6 @@
-//! A tiny document tree that JSON, TOML and XML all collapse into, so the rest
-//! of the program reads mod metadata without caring which format it arrived in.
+//! A tiny document tree that JSON, TOML, XML, INI and YAML all collapse into,
+//! so the rest of the program reads mod metadata without caring which format it
+//! arrived in.
 //!
 //! Numbers and booleans are flattened to strings on load: every field we ever
 //! read (id, version, dependency name, version requirement) is textual, and a
@@ -28,6 +29,9 @@ pub enum Format {
     /// map of strings, section-less keys sit at the top. Unlocks 7 Days to Die,
     /// several Unity titles, and parts of the Paradox games.
     Ini,
+    /// YAML manifests, mapped the same way as JSON. The parser (libyaml) caps
+    /// its own nesting, so — like TOML — no depth guard is needed here.
+    Yaml,
 }
 
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -69,6 +73,11 @@ pub fn load(bytes: &[u8], format: Format) -> Result<Value> {
             let ini = ini::Ini::load_from_str(text).context("invalid INI")?;
             Ok(from_ini(&ini))
         }
+        // libyaml caps its own recursion (a deeply nested document errors
+        // rather than overflowing), so no depth guard is needed.
+        Format::Yaml => Ok(from_yaml(
+            &serde_yaml_ng::from_str(text).context("invalid YAML")?,
+        )),
         Format::Xml => {
             // Checked before parsing, not after: roxmltree recurses while
             // parsing, and a stack overflow aborts the process rather than
@@ -159,6 +168,33 @@ fn from_json(value: &serde_json::Value) -> Value {
         serde_json::Value::String(s) => Value::Str(s.clone()),
         serde_json::Value::Null => Value::Str(String::new()),
         scalar => Value::Str(scalar.to_string()),
+    }
+}
+
+/// Same shape as `from_json`: scalars flatten to strings so a version like
+/// `1.0` survives as text. Non-string keys (rare in a manifest) are stringified.
+fn from_yaml(value: &serde_yaml_ng::Value) -> Value {
+    use serde_yaml_ng::Value as Y;
+    match value {
+        Y::Sequence(s) => Value::List(s.iter().map(from_yaml).collect()),
+        Y::Mapping(m) => Value::Map(m.iter().map(|(k, v)| (yaml_key(k), from_yaml(v))).collect()),
+        Y::String(s) => Value::Str(s.clone()),
+        Y::Bool(b) => Value::Str(b.to_string()),
+        Y::Number(n) => Value::Str(n.to_string()),
+        Y::Null => Value::Str(String::new()),
+        // A tagged node (`!Foo value`) carries a tag we do not use; keep the value.
+        Y::Tagged(t) => from_yaml(&t.value),
+    }
+}
+
+fn yaml_key(key: &serde_yaml_ng::Value) -> String {
+    use serde_yaml_ng::Value as Y;
+    match key {
+        Y::String(s) => s.clone(),
+        Y::Bool(b) => b.to_string(),
+        Y::Number(n) => n.to_string(),
+        // A non-scalar key is not something a real manifest uses.
+        _ => String::new(),
     }
 }
 
@@ -291,6 +327,36 @@ mod tests {
     fn reads_a_field_from_toml() {
         let v = load(b"[[mods]]\nmodId=\"alpha\"\nversion=\"1.0\"", Format::Toml).unwrap();
         assert_eq!(v.get_str("mods.modId"), Some("alpha"));
+    }
+
+    #[test]
+    fn reads_a_field_from_yaml() {
+        let yaml = b"id: alpha\nversion: \"1.0\"\ndeps:\n  - fabric\n  - forge\n";
+        let v = load(yaml, Format::Yaml).unwrap();
+        assert_eq!(v.get_str("id"), Some("alpha"));
+        assert_eq!(v.get_str("version"), Some("1.0"));
+        let deps: Vec<_> = v
+            .get("deps")
+            .unwrap()
+            .items()
+            .into_iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(deps, vec!["fabric", "forge"]);
+    }
+
+    #[test]
+    fn reads_a_nested_yaml_field_by_dotted_path() {
+        let yaml = b"mod:\n  meta:\n    name: deep\n";
+        let v = load(yaml, Format::Yaml).unwrap();
+        assert_eq!(v.get_str("mod.meta.name"), Some("deep"));
+    }
+
+    #[test]
+    fn deeply_nested_yaml_is_rejected_rather_than_overflowing() {
+        // libyaml caps its own nesting depth, so this errors, it does not crash.
+        let yaml = format!("{}1{}", "[".repeat(100_000), "]".repeat(100_000));
+        assert!(load(yaml.as_bytes(), Format::Yaml).is_err());
     }
 
     #[test]
