@@ -49,6 +49,14 @@ const FORMATS: &[ContainerFormat] = &[
         read: read_larian,
     },
     ContainerFormat {
+        // Ren'Py visual novels: .rpa, an index pickled at the front of the file.
+        // Must come before the Unreal entry — a .rpa has a `.pak`-less name but
+        // the Unreal sniff is permissive, and this one is specific.
+        name: "Ren'Py archive",
+        sniff: sniff_renpy,
+        read: read_rpa,
+    },
+    ContainerFormat {
         // Unreal Engine 4 and 5: .pak
         name: "Unreal pak",
         sniff: sniff_unreal,
@@ -63,7 +71,7 @@ const SNIFF_LEN: usize = 8;
 /// file in a mod folder would cost a syscall per texture for no gain, and one
 /// of the readers below has to be permissive about headers — bounding it to
 /// plausible filenames keeps that permissiveness harmless.
-const CONTAINER_EXTENSIONS: &[&str] = &["bsa", "ba2", "vpk", "pak"];
+const CONTAINER_EXTENSIONS: &[&str] = &["bsa", "ba2", "vpk", "pak", "rpa"];
 
 pub fn is_candidate(path: &Path) -> bool {
     path.extension()
@@ -206,6 +214,20 @@ fn read_unreal(path: &Path) -> anyhow::Result<Vec<String>> {
     Ok(pak.entries())
 }
 
+/// The header is ASCII `RPA-3.0`, `RPA-3.2`, or `RPA-2.0`.
+fn sniff_renpy(head: &[u8]) -> bool {
+    head.starts_with(b"RPA-")
+}
+
+fn read_rpa(path: &Path) -> anyhow::Result<Vec<String>> {
+    let archive = warpalib::RenpyArchive::open(path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(archive
+        .content
+        .keys()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
+
 fn normalize(path: &str) -> String {
     path.replace('\\', "/")
         .trim_start_matches("./")
@@ -246,6 +268,54 @@ mod tests {
     fn recognizes_the_valve_magic() {
         assert!(sniff_vpk(&0x55AA_1234u32.to_le_bytes()));
         assert!(!sniff_vpk(b"BSA\0"));
+    }
+
+    #[test]
+    fn recognizes_the_renpy_magic_and_keeps_it_ahead_of_unreal() {
+        assert!(sniff_renpy(b"RPA-3.0 "));
+        assert!(sniff_renpy(b"RPA-2.0 "));
+        assert!(!sniff_renpy(b"PK\x03\x04"));
+        // The Unreal sniff is permissive and would also claim an RPA header, so
+        // ordering is what keeps a Ren'Py archive out of its hands.
+        let renpy = FORMATS
+            .iter()
+            .position(|f| f.name == "Ren'Py archive")
+            .unwrap();
+        let unreal = FORMATS.iter().position(|f| f.name == "Unreal pak").unwrap();
+        assert!(renpy < unreal);
+    }
+
+    #[test]
+    fn a_renpy_archive_lists_its_inner_paths() {
+        use std::io::Cursor;
+        let dir = tempfile::tempdir().unwrap();
+
+        // Build a real .rpa with the library's own writer, then read it back.
+        let mut archive = warpalib::RenpyArchive::new();
+        archive
+            .content
+            .insert_raw("game/script.rpy", b"label start:".to_vec());
+        archive
+            .content
+            .insert_raw("gui/main_menu.png", vec![0u8; 16]);
+        let mut buffer = Cursor::new(Vec::new());
+        archive.flush(&mut buffer).unwrap();
+        let path = write_file(dir.path(), "mod.rpa", &buffer.into_inner());
+
+        let container = read(&path)
+            .unwrap()
+            .expect("a real .rpa should be recognized as a container");
+
+        assert_eq!(container.format, "Ren'Py archive");
+        let mut files = container.files;
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                "game/script.rpy".to_string(),
+                "gui/main_menu.png".to_string()
+            ]
+        );
     }
 
     #[test]
