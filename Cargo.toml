@@ -41,6 +41,7 @@ blake3 = "1.8.5"
 globset = "0.4"
 jsonc-parser = { version = "0.26", features = ["serde"] }
 rust-ini = "0.21"
+warpalib = "0.3"
 # A container packed inside a .zip is extracted to a temp file before the
 # path-based readers can open it (see scan::read_archive).
 tempfile = "3"

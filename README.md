@@ -143,6 +143,7 @@ format's version drift, which is the part that actually rots:
 | `.vpk` | Source engine | [`vpk`](https://crates.io/crates/vpk) |
 | `.pak` | Unreal Engine 4 and 5 | [`unpak`](https://crates.io/crates/unpak) |
 | `.pak` (LSPK) | Baldur's Gate 3 and other Larian games | [`larian-formats`](https://crates.io/crates/larian-formats) |
+| `.rpa` | Ren'Py visual novels | [`warpalib`](https://crates.io/crates/warpalib) |
 
 Archives are identified by magic bytes, not by extension, because renamed
 extensions are common — Baldur's Gate 3 and Unreal both use `.pak` for two
