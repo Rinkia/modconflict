@@ -30,7 +30,9 @@ pub struct RecordScan {
     requires: Vec<(ModId, String)>,
     /// Pairs of plugins from different mods that edit the same records.
     overlaps: Vec<Conflict>,
-    /// Plugins that could not be parsed, for a note in the report.
+    /// Plugins the record pass could not fully handle — parse, master-read, or
+    /// record-id resolution failures. Reported so a gap never looks like a
+    /// clean result.
     pub unreadable: Vec<String>,
 }
 
@@ -150,15 +152,24 @@ pub fn scan(
     }
 
     for entry in &loaded {
-        for master in entry.plugin.masters().unwrap_or_default() {
-            if base.contains(&master.to_ascii_lowercase()) {
-                continue;
+        match entry.plugin.masters() {
+            Ok(masters) => {
+                for master in masters {
+                    if base.contains(&master.to_ascii_lowercase()) {
+                        continue;
+                    }
+                    result.requires.push((entry.mod_id.clone(), master));
+                }
             }
-            result.requires.push((entry.mod_id.clone(), master));
+            // A failed masters read would otherwise report the mod as needing
+            // nothing — a false all-clear for missing-dependency detection.
+            Err(e) => result
+                .unreadable
+                .push(format!("{} (masters unreadable: {e})", entry.filename)),
         }
     }
 
-    resolve(&mut loaded);
+    result.unreadable.extend(resolve(&mut loaded));
     result.overlaps = compare(&loaded, manager);
     result
 }
@@ -190,14 +201,27 @@ fn load(game: GameId, path: &Path) -> anyhow::Result<Plugin> {
 /// nothing across plugins until they are resolved against it. Skipping this
 /// step would compare two different numbering schemes and call it an overlap.
 #[cfg(feature = "records")]
-fn resolve(loaded: &mut [Loaded]) {
+fn resolve(loaded: &mut [Loaded]) -> Vec<String> {
+    let mut failed = Vec::new();
     let refs: Vec<&Plugin> = loaded.iter().map(|l| &l.plugin).collect();
-    let Ok(metadata) = esplugin::plugins_metadata(&refs) else {
-        return;
-    };
-    for entry in loaded.iter_mut() {
-        let _ = entry.plugin.resolve_record_ids(&metadata);
+    match esplugin::plugins_metadata(&refs) {
+        Ok(metadata) => {
+            for entry in loaded.iter_mut() {
+                if let Err(e) = entry.plugin.resolve_record_ids(&metadata) {
+                    failed.push(format!("{} (record ids unresolved: {e})", entry.filename));
+                }
+            }
+        }
+        // Every FormID stays relative to its own plugin's master list, so
+        // esplugin refuses to compare unresolved ones and every overlap check
+        // returns an error that would otherwise collapse to "no conflict".
+        // Report it rather than hand back a load order that looks clean.
+        Err(e) => failed.push(format!(
+            "record id resolution failed for all {} plugins in this load order: {e}",
+            loaded.len()
+        )),
     }
+    failed
 }
 
 #[cfg(feature = "records")]
@@ -213,11 +237,16 @@ fn compare(loaded: &[Loaded], manager: Option<&ManagerData>) -> Vec<Conflict> {
             if a.mod_id == b.mod_id {
                 continue;
             }
+            // An Err here means the ids were never resolved — which resolve()
+            // has already recorded in `unreadable` — so treating it as "no
+            // overlap" no longer hides the failure, and avoids double-reporting.
             if !a.plugin.overlaps_with(&b.plugin).unwrap_or(false) {
                 continue;
             }
 
-            let records = a.plugin.overlap_size(&[&b.plugin]).unwrap_or(0);
+            // overlaps_with just returned Ok(true), so there is at least one
+            // shared record; a failed count must not read as a reassuring zero.
+            let records = a.plugin.overlap_size(&[&b.plugin]).unwrap_or(1);
             let mut mods = vec![a.mod_id.clone(), b.mod_id.clone()];
             mods.sort();
 
@@ -258,8 +287,10 @@ fn file_name(path: &Path) -> String {
 #[cfg(all(test, feature = "records"))]
 mod tests {
     use super::*;
+    use crate::loadorder::LoadOrder;
+    use crate::manager::ManagerData;
     use crate::profile::{by_name, load_all, Profile};
-    use crate::testutil::{metadata_names, write_plugin};
+    use crate::testutil::{metadata_names, write_plugin, write_zip_mod};
     use crate::{parse, scan as scanner};
 
     fn creation_engine() -> Profile {
@@ -408,6 +439,154 @@ mod tests {
         // The mod still exists, and still claims the plugin filename.
         assert_eq!(mods.len(), 2);
         assert_eq!(scan.plugin_count(), 2);
+    }
+
+    #[test]
+    fn a_manager_names_the_later_loading_plugin_as_the_winner() {
+        let dir = tempfile::tempdir().unwrap();
+        mod_with_plugin(dir.path(), "ModA", "A.esp", &["Skyrim.esm"], &[0x0000_0ABC]);
+        mod_with_plugin(dir.path(), "ModB", "B.esp", &["Skyrim.esm"], &[0x0000_0ABC]);
+
+        let profile = creation_engine();
+        let raw = scanner::scan_dir(dir.path(), &metadata_names())
+            .unwrap()
+            .mods;
+        let mods: Vec<_> = raw.iter().map(|m| parse::parse_mod(&profile, m)).collect();
+        let spec = profile.records.clone().unwrap();
+        let all: HashSet<&str> = ["ModA", "ModB"].into_iter().collect();
+
+        let winner_for = |order: &[&str]| -> Option<String> {
+            let manager = ManagerData {
+                name: "Mod Organizer 2",
+                profile: "Default".to_string(),
+                mod_order: LoadOrder::default(),
+                plugin_order: order.iter().map(|s| s.to_string()).collect(),
+            };
+            let scan = scan(&spec, &raw, &mods, Some(&manager));
+            assert!(scan.unreadable.is_empty(), "{:?}", scan.unreadable);
+            match scan.overlaps(&all).into_iter().next() {
+                Some(Conflict::RecordOverlap { winner, .. }) => winner,
+                other => panic!("expected a record overlap, got {other:?}"),
+            }
+        };
+
+        // The winner follows the manager's plugin order, not the mods' discovery
+        // order: flipping the order flips the winner, which an implementation
+        // that ignored the manager could not do.
+        assert_eq!(winner_for(&["A.esp", "B.esp"]).as_deref(), Some("B.esp"));
+        assert_eq!(winner_for(&["B.esp", "A.esp"]).as_deref(), Some("A.esp"));
+    }
+
+    #[test]
+    fn overlaps_keep_pairs_where_both_mods_stay_enabled_and_drop_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        mod_with_plugin(dir.path(), "ModA", "A.esp", &["Skyrim.esm"], &[0x0000_0ABC]);
+        mod_with_plugin(dir.path(), "ModB", "B.esp", &["Skyrim.esm"], &[0x0000_0ABC]);
+        mod_with_plugin(dir.path(), "ModC", "C.esp", &["Skyrim.esm"], &[0x0000_0FFF]);
+        mod_with_plugin(dir.path(), "ModD", "D.esp", &["Skyrim.esm"], &[0x0000_0FFF]);
+
+        let (scan, _) = run(dir.path());
+        // ModD is switched off; ModA, ModB, and ModC stay on.
+        let enabled: HashSet<&str> = ["ModA", "ModB", "ModC"].into_iter().collect();
+        let overlaps = scan.overlaps(&enabled);
+
+        assert_eq!(overlaps.len(), 1);
+        match &overlaps[0] {
+            Conflict::RecordOverlap { mods, .. } => {
+                assert_eq!(mods, &["ModA".to_string(), "ModB".to_string()]);
+            }
+            other => panic!("expected a record overlap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plugin_count_counts_every_plugin_file_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let one = dir.path().join("ModA");
+        std::fs::create_dir_all(&one).unwrap();
+        write_plugin(&one.join("A.esp"), &["Skyrim.esm"], &[0x0000_0ABC]);
+        write_plugin(&one.join("B.esp"), &["Skyrim.esm"], &[0x0000_0FFF]);
+
+        let (scan, _) = run(dir.path());
+
+        assert!(scan.unreadable.is_empty(), "{:?}", scan.unreadable);
+        assert_eq!(scan.plugin_count(), 2);
+    }
+
+    #[test]
+    fn base_master_matching_is_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        mod_with_plugin(dir.path(), "ModA", "A.esp", &["SKYRIM.ESM"], &[0x0000_0ABC]);
+
+        let (scan, mods) = run(dir.path());
+
+        assert!(scan.unreadable.is_empty(), "{:?}", scan.unreadable);
+        // SKYRIM.ESM still matches the profile's Skyrim.esm base id.
+        assert!(mods[0].requires.is_empty());
+    }
+
+    #[test]
+    fn a_plugin_with_multiple_masters_yields_a_dep_for_each() {
+        let dir = tempfile::tempdir().unwrap();
+        mod_with_plugin(
+            dir.path(),
+            "Patch",
+            "Patch.esp",
+            &["Skyrim.esm", "BigModOne.esp", "BigModTwo.esp"],
+            &[0x0100_0ABC],
+        );
+
+        let (scan, mods) = run(dir.path());
+
+        assert!(scan.unreadable.is_empty(), "{:?}", scan.unreadable);
+        let names: HashSet<&str> = mods[0].requires.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(mods[0].requires.len(), 2);
+        assert!(names.contains("BigModOne.esp"));
+        assert!(names.contains("BigModTwo.esp"));
+    }
+
+    #[test]
+    fn plugin_files_ignores_extensions_outside_the_profiles_list() {
+        let spec = creation_engine().records.clone().unwrap();
+        let files = vec!["A.esp".to_string(), "A.txt".to_string()];
+
+        let found: Vec<&str> = plugin_files(&spec, &files).collect();
+
+        assert_eq!(found, vec!["A.esp"]);
+    }
+
+    #[test]
+    fn a_zip_archive_mod_is_skipped_by_the_record_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        write_zip_mod(
+            dir.path(),
+            "ZippedMod.zip",
+            &[("plugin.esp", "not a real plugin")],
+        );
+        mod_with_plugin(dir.path(), "ModA", "A.esp", &["Skyrim.esm"], &[0x0000_0ABC]);
+
+        let (scan, mods) = run(dir.path());
+
+        assert!(scan.unreadable.is_empty(), "{:?}", scan.unreadable);
+        assert_eq!(scan.plugin_count(), 1);
+        assert_eq!(mods.len(), 2);
+    }
+
+    #[test]
+    fn multiple_unreadable_plugins_are_all_collected() {
+        let dir = tempfile::tempdir().unwrap();
+        let one = dir.path().join("BrokenModOne");
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::write(one.join("One.esp"), b"not a plugin at all").unwrap();
+        let two = dir.path().join("BrokenModTwo");
+        std::fs::create_dir_all(&two).unwrap();
+        std::fs::write(two.join("Two.esp"), b"also not a plugin").unwrap();
+
+        let (scan, _) = run(dir.path());
+
+        assert_eq!(scan.unreadable.len(), 2);
+        assert!(scan.unreadable.iter().any(|m| m.contains("One.esp")));
+        assert!(scan.unreadable.iter().any(|m| m.contains("Two.esp")));
     }
 
     /// Puts a number on the two `ponytail:` debts in this module — the
